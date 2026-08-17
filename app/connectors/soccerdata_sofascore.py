@@ -103,6 +103,8 @@ class SoccerDataSofascoreConnector(Connector):
         season_year: int,
         matchday: Optional[int] = None,
     ) -> List[NormalizedFixture]:
+        import pandas as pd
+
         reader = self._reader(competition_code, season_year)
         df = reader.read_schedule()
 

@@ -1,10 +1,29 @@
-# matchday-gateway
+<div align="center">
+  <img src="docs/assets/banner.svg" alt="Matchday" width="600">
 
-A self-hosted football (soccer) data gateway. It continuously syncs leagues,
-teams, fixtures and scores from pluggable upstream connectors, normalizes
-them into a stable schema, and serves them through its own REST API - so
-the app that depends on it (like [Predify](../predify)) only ever talks to
-*your* API, not directly to a third-party vendor.
+  <p><strong>A self-hosted football (soccer) data gateway.</strong></p>
+
+  ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue)
+  ![Status](https://img.shields.io/badge/status-early%20%2F%20MVP-yellow)
+  ![FastAPI](https://img.shields.io/badge/api-FastAPI-009688)
+</div>
+
+Matchday continuously syncs leagues, teams, fixtures and scores from
+pluggable upstream connectors, normalizes them into a stable schema, and
+serves them through its own REST API - so the app that depends on it (like
+[Predify](../predify)) only ever talks to *your* API, not directly to a
+third-party vendor.
+
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [What it does (and doesn't) solve](#what-it-does-and-doesnt-solve)
+- [Architecture](#architecture)
+- [Adding a connector](#adding-a-connector)
+- [Local development](#local-development)
+- [Backfill fallback](#backfill-fallback-optional-off-by-default)
+- [Consuming this from another app](#consuming-this-from-another-app)
+- [Status](#status)
 
 ## Why this exists
 

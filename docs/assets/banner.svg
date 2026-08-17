@@ -53,8 +53,8 @@
   </g>
 
   <!-- wordmark -->
-  <text x="255" y="182" font-family="Helvetica, Arial, sans-serif" font-size="88" font-weight="700" fill="#ffffff" letter-spacing="2">MATCHDAY</text>
+  <text x="253" y="188" font-family="'DIN Condensed', 'Arial Narrow', 'Arial Black', Impact, sans-serif" font-size="118" font-weight="700" fill="#ffffff" letter-spacing="4">MATCHDAY</text>
 
   <!-- tagline -->
-  <text x="258" y="222" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="#bfe3cd">Self-hosted football data gateway</text>
+  <text x="258" y="222" font-family="'DIN Condensed', 'Arial Narrow', Arial, sans-serif" font-size="28" font-weight="500" letter-spacing="1.5" fill="#bfe3cd">SELF-HOSTED FOOTBALL DATA GATEWAY</text>
 </svg>

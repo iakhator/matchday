@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/banner.svg" alt="Matchday" width="600">
+  <img src="docs/assets/banner.png" alt="Matchday" width="600">
 
   <p><strong>A self-hosted football (soccer) data gateway.</strong></p>
 

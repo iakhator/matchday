@@ -24,9 +24,17 @@ async def trigger_sync(
         league = await sync_service.sync_league(code)
         teams = []
         fixtures = []
+        standings = []
+        player_stats = []
         if league.current_season_year:
             teams = await sync_service.sync_teams(league, league.current_season_year)
             fixtures = await sync_service.sync_fixtures(
+                league, league.current_season_year
+            )
+            standings = await sync_service.sync_standings(
+                league, league.current_season_year
+            )
+            player_stats = await sync_service.sync_player_stats(
                 league, league.current_season_year
             )
         results.append(
@@ -36,6 +44,8 @@ async def trigger_sync(
                 "season": league.current_season_year,
                 "teams_synced": len(teams),
                 "fixtures_synced": len(fixtures),
+                "standings_synced": len(standings),
+                "player_stats_synced": len(player_stats),
             }
         )
 

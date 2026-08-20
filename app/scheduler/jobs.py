@@ -35,6 +35,25 @@ async def sync_fixtures_job() -> None:
                 logger.exception(f"Fixture sync failed for '{code}'")
 
 
+async def sync_standings_and_players_job() -> None:
+    """Medium-cadence job: refresh league tables and season scorer stats for
+    every tracked competition's current season."""
+    async with async_session() as session:
+        sync_service = SyncService(session)
+        for code in SchedulerConfig.TRACKED_COMPETITIONS:
+            try:
+                league = await sync_service.sync_league(code)
+                if league.current_season_year:
+                    await sync_service.sync_standings(
+                        league, league.current_season_year
+                    )
+                    await sync_service.sync_player_stats(
+                        league, league.current_season_year
+                    )
+            except Exception:
+                logger.exception(f"Standings/player stats sync failed for '{code}'")
+
+
 async def sync_live_fixtures_job() -> None:
     """Fast-cadence job: keeps scores fresh during an actual match instead
     of waiting for the next 15-minute cycle. Only calls the upstream API

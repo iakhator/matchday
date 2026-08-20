@@ -7,6 +7,7 @@ from app.scheduler.jobs import (
     sync_fixtures_job,
     sync_leagues_and_teams_job,
     sync_live_fixtures_job,
+    sync_standings_and_players_job,
 )
 
 scheduler = AsyncIOScheduler()
@@ -35,12 +36,22 @@ def start_scheduler() -> None:
         id="sync_live_fixtures",
         replace_existing=True,
     )
+    scheduler.add_job(
+        sync_standings_and_players_job,
+        trigger=IntervalTrigger(
+            minutes=SchedulerConfig.STANDINGS_AND_PLAYERS_SYNC_INTERVAL_MINUTES
+        ),
+        id="sync_standings_and_players",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
         "Scheduler started: leagues/teams every "
         f"{SchedulerConfig.LEAGUE_TEAM_SYNC_INTERVAL_MINUTES}m, "
         f"fixtures every {SchedulerConfig.FIXTURE_SYNC_INTERVAL_MINUTES}m, "
-        f"live fixtures every {SchedulerConfig.LIVE_FIXTURE_SYNC_INTERVAL_SECONDS}s "
+        f"live fixtures every {SchedulerConfig.LIVE_FIXTURE_SYNC_INTERVAL_SECONDS}s, "
+        "standings/players every "
+        f"{SchedulerConfig.STANDINGS_AND_PLAYERS_SYNC_INTERVAL_MINUTES}m "
         f"for {', '.join(SchedulerConfig.TRACKED_COMPETITIONS)}"
     )
 

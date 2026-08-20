@@ -7,6 +7,8 @@ from app.connectors.base import (
     Connector,
     NormalizedFixture,
     NormalizedLeague,
+    NormalizedPlayerStat,
+    NormalizedStanding,
     NormalizedTeam,
 )
 from app.core.config import settings
@@ -127,3 +129,65 @@ class FootballDataOrgConnector(Connector):
                 )
             )
         return fixtures
+
+    async def fetch_standings(
+        self, competition_code: str, season_year: int
+    ) -> List[NormalizedStanding]:
+        data = await self._get(
+            f"/competitions/{competition_code}/standings",
+            params={"season": season_year},
+        )
+
+        # There's one "TOTAL" table plus (for some competitions) separate
+        # HOME/AWAY breakdowns under the same `standings` list - only the
+        # overall table is what Standing.rank/points etc represent.
+        total_table = next(
+            (s["table"] for s in data.get("standings", []) if s.get("type") == "TOTAL"),
+            [],
+        )
+
+        standings = []
+        for row in total_table:
+            standings.append(
+                NormalizedStanding(
+                    team_external_ref=str(row["team"]["id"]),
+                    rank=row["position"],
+                    points=row["points"],
+                    played=row["playedGames"],
+                    won=row["won"],
+                    drawn=row["draw"],
+                    lost=row["lost"],
+                    goals_for=row["goalsFor"],
+                    goals_against=row["goalsAgainst"],
+                    form=row.get("form"),
+                )
+            )
+        return standings
+
+    async def fetch_player_stats(
+        self, competition_code: str, season_year: int
+    ) -> List[NormalizedPlayerStat]:
+        # 100 is the max `limit` football-data.org's free tier accepts for
+        # this endpoint - covers every player who's scored, which is the
+        # only set a "hot player" pick could ever need anyway.
+        data = await self._get(
+            f"/competitions/{competition_code}/scorers",
+            params={"season": season_year, "limit": 100},
+        )
+
+        stats = []
+        for entry in data.get("scorers", []):
+            player = entry.get("player") or {}
+            team = entry.get("team") or {}
+            stats.append(
+                NormalizedPlayerStat(
+                    external_ref=str(player["id"]),
+                    team_external_ref=str(team["id"]),
+                    name=player["name"],
+                    position=player.get("position") or player.get("section"),
+                    goals=entry.get("goals") or 0,
+                    assists=entry.get("assists") or 0,
+                    appearances=entry.get("playedMatches") or 0,
+                )
+            )
+        return stats

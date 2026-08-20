@@ -18,6 +18,12 @@ class SchedulerConfig:
     # How often to re-sync fixtures/scores for tracked competitions (minutes).
     FIXTURE_SYNC_INTERVAL_MINUTES = 15
 
+    # How often to re-sync standings/player stats (minutes). These change
+    # whenever a match finishes, same trigger as fixtures, but don't need
+    # fixtures' 15-minute freshness - a slower dedicated cadence keeps this
+    # well within football-data.org's free-tier 10 requests/minute budget.
+    STANDINGS_AND_PLAYERS_SYNC_INTERVAL_MINUTES = 30
+
     # Fast-cadence live-score refresh (seconds). Only actually calls the
     # upstream API when a competition has a fixture in its live window (see
     # SyncService.has_live_window_fixtures) - not a blind poll around the

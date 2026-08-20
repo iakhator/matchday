@@ -34,6 +34,30 @@ class NormalizedFixture(BaseModel):
     away_score: Optional[int] = None
 
 
+class NormalizedStanding(BaseModel):
+    team_external_ref: str
+    rank: int
+    points: int
+    played: int
+    won: int
+    drawn: int
+    lost: int
+    goals_for: int
+    goals_against: int
+    form: Optional[str] = None
+
+
+class NormalizedPlayerStat(BaseModel):
+    external_ref: str
+    team_external_ref: str
+    name: str
+    photo: Optional[str] = None
+    position: Optional[str] = None
+    goals: int = 0
+    assists: int = 0
+    appearances: int = 0
+
+
 class Connector(ABC):
     """A pluggable upstream data source.
 
@@ -64,3 +88,13 @@ class Connector(ABC):
         season_year: int,
         matchday: Optional[int] = None,
     ) -> List[NormalizedFixture]: ...
+
+    @abstractmethod
+    async def fetch_standings(
+        self, competition_code: str, season_year: int
+    ) -> List[NormalizedStanding]: ...
+
+    @abstractmethod
+    async def fetch_player_stats(
+        self, competition_code: str, season_year: int
+    ) -> List[NormalizedPlayerStat]: ...

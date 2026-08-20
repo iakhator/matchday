@@ -9,7 +9,7 @@ from app.connectors.registry import get_connectors
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
-from app.db.models import Fixture, League, Team
+from app.db.models import Fixture, League, PlayerStat, Standing, Team
 from app.utils.datetime_utils import utcnow
 
 
@@ -72,7 +72,9 @@ class SyncService:
 
         await self.session.commit()
         await self.session.refresh(league)
-        logger.info(f"Synced league {league.name} ({league.source}:{league.external_ref})")
+        logger.info(
+            f"Synced league {league.name} ({league.source}:{league.external_ref})"
+        )
         return league
 
     async def sync_teams(self, league: League, season_year: int) -> List[Team]:
@@ -219,6 +221,183 @@ class SyncService:
             )
         logger.info(f"Synced {len(fixtures)} fixtures for league {league.name}")
         return fixtures
+
+    async def sync_standings(self, league: League, season_year: int) -> List[Standing]:
+        connectors: List[Connector] = get_connectors()
+        connector, normalized_standings = await self._first_success(
+            f"standings for league {league.id} season {season_year}",
+            [
+                (c, c.fetch_standings(league.external_ref, season_year))
+                for c in connectors
+                if c.source == league.source
+            ]
+            or [
+                (c, c.fetch_standings(league.external_ref, season_year))
+                for c in connectors
+            ],
+        )
+
+        team_rows = (
+            await self.session.exec(
+                select(Team).where(
+                    Team.league_id == league.id, Team.season_year == season_year
+                )
+            )
+        ).all()
+        team_id_by_ref = {t.external_ref: t.id for t in team_rows}
+
+        existing_rows = (
+            await self.session.exec(
+                select(Standing).where(
+                    Standing.league_id == league.id, Standing.season_year == season_year
+                )
+            )
+        ).all()
+        existing_by_team_id = {s.team_id: s for s in existing_rows}
+
+        standings = []
+        skipped = 0
+        for normalized in normalized_standings:
+            team_id = team_id_by_ref.get(normalized.team_external_ref)
+            if not team_id:
+                # Same reasoning as sync_fixtures - a team not yet in this
+                # season's roster (sync_teams hasn't caught up). Skip rather
+                # than write a standing row with no valid team.
+                skipped += 1
+                continue
+
+            existing = existing_by_team_id.get(team_id)
+            if existing:
+                existing.rank = normalized.rank
+                existing.points = normalized.points
+                existing.played = normalized.played
+                existing.won = normalized.won
+                existing.drawn = normalized.drawn
+                existing.lost = normalized.lost
+                existing.goals_for = normalized.goals_for
+                existing.goals_against = normalized.goals_against
+                existing.form = normalized.form
+                existing.last_synced_at = utcnow()
+                existing.updated_at = utcnow()
+                standing = existing
+            else:
+                standing = Standing(
+                    league_id=league.id,
+                    team_id=team_id,
+                    season_year=season_year,
+                    rank=normalized.rank,
+                    points=normalized.points,
+                    played=normalized.played,
+                    won=normalized.won,
+                    drawn=normalized.drawn,
+                    lost=normalized.lost,
+                    goals_for=normalized.goals_for,
+                    goals_against=normalized.goals_against,
+                    form=normalized.form,
+                )
+                self.session.add(standing)
+            standings.append(standing)
+
+        await self.session.commit()
+        for standing in standings:
+            await self.session.refresh(standing)
+
+        if skipped:
+            logger.warning(
+                f"Skipped {skipped} standings rows for league {league.name} - "
+                "unknown team ref, run sync_teams first"
+            )
+        logger.info(f"Synced {len(standings)} standings for league {league.name}")
+        return standings
+
+    async def sync_player_stats(
+        self, league: League, season_year: int
+    ) -> List[PlayerStat]:
+        connectors: List[Connector] = get_connectors()
+        connector, normalized_stats = await self._first_success(
+            f"player stats for league {league.id} season {season_year}",
+            [
+                (c, c.fetch_player_stats(league.external_ref, season_year))
+                for c in connectors
+                if c.source == league.source
+            ]
+            or [
+                (c, c.fetch_player_stats(league.external_ref, season_year))
+                for c in connectors
+            ],
+        )
+
+        team_rows = (
+            await self.session.exec(
+                select(Team).where(
+                    Team.league_id == league.id, Team.season_year == season_year
+                )
+            )
+        ).all()
+        team_id_by_ref = {t.external_ref: t.id for t in team_rows}
+        team_ids = list(team_id_by_ref.values())
+
+        existing_rows = (
+            (
+                await self.session.exec(
+                    select(PlayerStat).where(
+                        PlayerStat.team_id.in_(team_ids),
+                        PlayerStat.season_year == season_year,
+                        PlayerStat.source == connector.source,
+                    )
+                )
+            ).all()
+            if team_ids
+            else []
+        )
+        existing_by_key = {(s.team_id, s.external_ref): s for s in existing_rows}
+
+        stats = []
+        skipped = 0
+        for normalized in normalized_stats:
+            team_id = team_id_by_ref.get(normalized.team_external_ref)
+            if not team_id:
+                skipped += 1
+                continue
+
+            existing = existing_by_key.get((team_id, normalized.external_ref))
+            if existing:
+                existing.name = normalized.name
+                existing.photo = normalized.photo
+                existing.position = normalized.position
+                existing.goals = normalized.goals
+                existing.assists = normalized.assists
+                existing.appearances = normalized.appearances
+                existing.last_synced_at = utcnow()
+                existing.updated_at = utcnow()
+                stat = existing
+            else:
+                stat = PlayerStat(
+                    team_id=team_id,
+                    season_year=season_year,
+                    source=connector.source,
+                    external_ref=normalized.external_ref,
+                    name=normalized.name,
+                    photo=normalized.photo,
+                    position=normalized.position,
+                    goals=normalized.goals,
+                    assists=normalized.assists,
+                    appearances=normalized.appearances,
+                )
+                self.session.add(stat)
+            stats.append(stat)
+
+        await self.session.commit()
+        for stat in stats:
+            await self.session.refresh(stat)
+
+        if skipped:
+            logger.warning(
+                f"Skipped {skipped} player stat rows for league {league.name} - "
+                "unknown team ref, run sync_teams first"
+            )
+        logger.info(f"Synced {len(stats)} player stats for league {league.name}")
+        return stats
 
     async def has_live_window_fixtures(self, competition_code: str) -> bool:
         """Cheap DB-only check (no upstream call) for whether

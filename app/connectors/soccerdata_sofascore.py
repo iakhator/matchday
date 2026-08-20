@@ -6,6 +6,8 @@ from app.connectors.base import (
     Connector,
     NormalizedFixture,
     NormalizedLeague,
+    NormalizedPlayerStat,
+    NormalizedStanding,
     NormalizedTeam,
 )
 
@@ -138,3 +140,20 @@ class SoccerDataSofascoreConnector(Connector):
                 )
             )
         return fixtures
+
+    async def fetch_standings(
+        self, competition_code: str, season_year: int
+    ) -> List[NormalizedStanding]:
+        # Backfill-only, for FINISHED fixture results - see class docstring.
+        # Standings/player-stats aren't part of that job, so this connector
+        # (never in the active registry anyway) doesn't support them.
+        raise NotImplementedError(
+            "SoccerDataSofascoreConnector only backfills finished fixture results"
+        )
+
+    async def fetch_player_stats(
+        self, competition_code: str, season_year: int
+    ) -> List[NormalizedPlayerStat]:
+        raise NotImplementedError(
+            "SoccerDataSofascoreConnector only backfills finished fixture results"
+        )

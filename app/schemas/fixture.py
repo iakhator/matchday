@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -8,8 +7,8 @@ from app.schemas.team import TeamOut
 
 
 class FixtureOut(BaseModel):
-    id: uuid.UUID
-    league_id: uuid.UUID
+    id: int
+    league_id: int
     season_year: int
     matchday: Optional[int]
     home_team: TeamOut

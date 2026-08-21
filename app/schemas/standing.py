@@ -9,7 +9,7 @@ from app.schemas.team import TeamOut
 
 class StandingOut(BaseModel):
     id: uuid.UUID
-    league_id: uuid.UUID
+    league_id: int
     season_year: int
     team: TeamOut
     rank: int

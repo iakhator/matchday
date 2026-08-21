@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 class PlayerStatOut(BaseModel):
     id: uuid.UUID
-    team_id: uuid.UUID
+    team_id: int
     season_year: int
     name: str
     photo: Optional[str]

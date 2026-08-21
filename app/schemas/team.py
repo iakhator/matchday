@@ -1,12 +1,11 @@
-import uuid
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
 
 class TeamOut(BaseModel):
-    id: uuid.UUID
-    league_id: uuid.UUID
+    id: int
+    league_id: int
     season_year: int
     name: str
     short_name: Optional[str]

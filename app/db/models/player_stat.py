@@ -24,7 +24,7 @@ class PlayerStat(SQLModel, table=True):
     __tablename__: str = "player_stats"
 
     id: uuid.UUID = Field(default_factory=uuid7, primary_key=True)
-    team_id: uuid.UUID = Field(foreign_key="teams.id", nullable=False)
+    team_id: int = Field(foreign_key="teams.id", nullable=False)
     season_year: int = Field(nullable=False)
 
     source: str = Field(max_length=50, nullable=False)

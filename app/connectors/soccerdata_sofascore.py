@@ -81,12 +81,14 @@ class SoccerDataSofascoreConnector(Connector):
         return mapped
 
     async def fetch_league(self, competition_code: str) -> NormalizedLeague:
-        league_key, country = self._require_league(competition_code)
-        return NormalizedLeague(
-            external_ref=competition_code,
-            name=league_key.split("-", 1)[1],
-            country=country,
-            current_season_year=None,
+        # Sofascore (via `soccerdata`) has no stable numeric competition id
+        # to satisfy NormalizedLeague.external_id, and this connector is
+        # never actually asked to create/update League rows in practice -
+        # it's never in the active registry (see registry.py), and
+        # backfill_finished_results takes an already-synced League in,
+        # rather than fetching one itself. See class docstring.
+        raise NotImplementedError(
+            "SoccerDataSofascoreConnector only backfills finished fixture results"
         )
 
     async def fetch_teams(

@@ -1,10 +1,8 @@
-import uuid
 from datetime import datetime
 from typing import Optional
 
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
-from uuid6 import uuid7
 
 from app.utils.datetime_utils import utcnow
 
@@ -21,18 +19,21 @@ FIXTURE_STATUSES = (
 
 
 class Fixture(SQLModel, table=True):
+    """A single match. `id` is the provider's own stable numeric match id
+    (e.g. football-data.org's fixture id) - same reasoning as League/Team,
+    see those models' docstrings.
+    """
+
     __tablename__: str = "fixtures"
 
-    id: uuid.UUID = Field(default_factory=uuid7, primary_key=True)
-    league_id: uuid.UUID = Field(foreign_key="leagues.id", nullable=False)
+    id: int = Field(primary_key=True)
+    league_id: int = Field(foreign_key="leagues.id", nullable=False)
     season_year: int = Field(nullable=False)
     matchday: Optional[int] = Field(default=None, index=True)
-
     source: str = Field(max_length=50, nullable=False)
-    external_ref: str = Field(max_length=50, nullable=False)
 
-    home_team_id: uuid.UUID = Field(foreign_key="teams.id", nullable=False)
-    away_team_id: uuid.UUID = Field(foreign_key="teams.id", nullable=False)
+    home_team_id: int = Field(foreign_key="teams.id", nullable=False)
+    away_team_id: int = Field(foreign_key="teams.id", nullable=False)
 
     kickoff_at: datetime = Field(
         sa_column=sa.Column(sa.DateTime(timezone=True), nullable=False)
@@ -54,8 +55,4 @@ class Fixture(SQLModel, table=True):
         sa_column=sa.Column(
             sa.DateTime(timezone=True), default=utcnow, onupdate=utcnow
         ),
-    )
-
-    __table_args__ = (
-        sa.UniqueConstraint("source", "external_ref", name="uq_fixture_source_ref"),
     )

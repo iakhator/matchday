@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 
 class NormalizedLeague(BaseModel):
+    external_id: int
     external_ref: str
     name: str
     country: Optional[str] = None

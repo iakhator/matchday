@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -6,7 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class LeagueOut(BaseModel):
-    id: uuid.UUID
+    id: int
     name: str
     country: Optional[str]
     logo: Optional[str]

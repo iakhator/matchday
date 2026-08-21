@@ -23,7 +23,7 @@ async def list_leagues(
 
 @router.get("/{league_id}", response_model=LeagueOut)
 async def get_league(
-    league_id: str,
+    league_id: int,
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_api_key),
 ):

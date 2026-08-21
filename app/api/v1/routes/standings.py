@@ -15,7 +15,7 @@ router = APIRouter(prefix="/leagues/{league_id}/standings", tags=["standings"])
 
 @router.get("", response_model=StandingListResponse)
 async def list_standings(
-    league_id: str,
+    league_id: int,
     season: Optional[int] = Query(
         None, description="Defaults to the league's current season"
     ),

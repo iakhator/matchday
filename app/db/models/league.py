@@ -1,10 +1,8 @@
-import uuid
 from datetime import datetime
 from typing import Optional
 
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
-from uuid6 import uuid7
 
 from app.utils.datetime_utils import utcnow
 
@@ -12,17 +10,23 @@ from app.utils.datetime_utils import utcnow
 class League(SQLModel, table=True):
     """A competition/league, normalized across connectors.
 
-    `source` + `external_ref` identifies where this row came from and what
-    ID that connector uses internally (e.g. source="football_data_org",
-    external_ref="PL"). Everything downstream only ever sees this table's
-    own `id` - connector identity is an implementation detail.
+    `id` is the provider's own stable numeric identifier (e.g.
+    football-data.org's competition id, 2021 for the Premier League) - not
+    a synthetic key. Confirmed this id never changes across seasons, so one
+    row represents a competition forever; `current_season_year` is just
+    overwritten in place on each sync rather than the row being recreated.
+
+    `external_ref` is kept separately because it's the provider's *code*
+    (e.g. "PL"), not the numeric id - that's what every sync method uses to
+    call the upstream API, since football-data.org's URL paths take the
+    code, not the numeric id.
     """
 
     __tablename__: str = "leagues"
 
-    id: uuid.UUID = Field(default_factory=uuid7, primary_key=True)
+    id: int = Field(primary_key=True)
     source: str = Field(max_length=50, nullable=False)
-    external_ref: str = Field(max_length=50, nullable=False)
+    external_ref: str = Field(max_length=50, nullable=False, index=True)
 
     name: str = Field(nullable=False)
     country: Optional[str] = Field(default=None)
@@ -37,8 +41,4 @@ class League(SQLModel, table=True):
         sa_column=sa.Column(
             sa.DateTime(timezone=True), default=utcnow, onupdate=utcnow
         ),
-    )
-
-    __table_args__ = (
-        sa.UniqueConstraint("source", "external_ref", name="uq_league_source_ref"),
     )

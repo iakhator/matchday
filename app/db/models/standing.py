@@ -20,8 +20,8 @@ class Standing(SQLModel, table=True):
     __tablename__: str = "standings"
 
     id: uuid.UUID = Field(default_factory=uuid7, primary_key=True)
-    league_id: uuid.UUID = Field(foreign_key="leagues.id", nullable=False)
-    team_id: uuid.UUID = Field(foreign_key="teams.id", nullable=False)
+    league_id: int = Field(foreign_key="leagues.id", nullable=False)
+    team_id: int = Field(foreign_key="teams.id", nullable=False)
     season_year: int = Field(nullable=False)
 
     rank: int = Field(nullable=False)

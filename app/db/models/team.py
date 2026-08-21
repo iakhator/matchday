@@ -1,23 +1,35 @@
-import uuid
 from datetime import datetime
 from typing import Optional
 
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
-from uuid6 import uuid7
 
 from app.utils.datetime_utils import utcnow
 
 
 class Team(SQLModel, table=True):
+    """A real-world club, normalized across connectors.
+
+    `id` is the provider's own stable numeric identifier (e.g.
+    football-data.org's team id, 57 for Arsenal FC) - confirmed this never
+    changes across seasons or even across leagues (survives promotion/
+    relegation), so one row represents a club forever.
+
+    `league_id`/`season_year` are deliberately NOT part of this row's
+    identity - they're just this team's *current* league and season,
+    overwritten in place on every sync the same way League.
+    current_season_year already works. A club moving up/down a division
+    updates these two fields rather than creating a new Team row. Anything
+    that's genuinely season-specific (standings, fixtures, player stats)
+    already carries its own season_year and points at this stable id.
+    """
+
     __tablename__: str = "teams"
 
-    id: uuid.UUID = Field(default_factory=uuid7, primary_key=True)
-    league_id: uuid.UUID = Field(foreign_key="leagues.id", nullable=False)
-    season_year: int = Field(nullable=False)
-
+    id: int = Field(primary_key=True)
     source: str = Field(max_length=50, nullable=False)
-    external_ref: str = Field(max_length=50, nullable=False)
+    league_id: int = Field(foreign_key="leagues.id", nullable=False)
+    season_year: int = Field(nullable=False)
 
     name: str = Field(nullable=False)
     short_name: Optional[str] = Field(default=None)
@@ -32,12 +44,5 @@ class Team(SQLModel, table=True):
         default_factory=utcnow,
         sa_column=sa.Column(
             sa.DateTime(timezone=True), default=utcnow, onupdate=utcnow
-        ),
-    )
-
-    __table_args__ = (
-        sa.UniqueConstraint(
-            "league_id", "season_year", "source", "external_ref",
-            name="uq_team_league_season_source_ref",
         ),
     )

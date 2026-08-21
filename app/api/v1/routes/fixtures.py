@@ -16,7 +16,7 @@ router = APIRouter(tags=["fixtures"])
 
 @router.get("/leagues/{league_id}/fixtures", response_model=FixtureListResponse)
 async def list_fixtures(
-    league_id: str,
+    league_id: int,
     season: Optional[int] = Query(
         None, description="Defaults to the league's current season"
     ),
@@ -78,7 +78,7 @@ async def list_fixtures(
 
 @router.get("/fixtures/{fixture_id}", response_model=FixtureOut)
 async def get_fixture(
-    fixture_id: str,
+    fixture_id: int,
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_api_key),
 ):

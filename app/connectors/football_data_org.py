@@ -53,6 +53,7 @@ class FootballDataOrgConnector(Connector):
         start_date = current_season.get("startDate")
 
         return NormalizedLeague(
+            external_id=data["id"],
             external_ref=data["code"],
             name=data["name"],
             country=(data.get("area") or {}).get("name"),

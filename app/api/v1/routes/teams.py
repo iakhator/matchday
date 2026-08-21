@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,26 +14,19 @@ router = APIRouter(prefix="/leagues/{league_id}/teams", tags=["teams"])
 
 @router.get("", response_model=List[TeamOut])
 async def list_teams(
-    league_id: str,
-    season: Optional[int] = Query(
-        None, description="Defaults to the league's current season"
-    ),
+    league_id: int,
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_api_key),
 ):
+    """Always the *current* roster - Team rows aren't season-scoped (a
+    club keeps the same id forever, see the Team model's docstring), so
+    there's no way to ask for a past season's roster here. For historical
+    per-season data, use /standings instead."""
     league = await session.get(League, league_id)
     if not league:
         raise HTTPException(status_code=404, detail="League not found")
 
-    season_year = season or league.current_season_year
-    if not season_year:
-        return []
-
     teams = (
-        await session.exec(
-            select(Team).where(
-                Team.league_id == league.id, Team.season_year == season_year
-            )
-        )
+        await session.exec(select(Team).where(Team.league_id == league.id))
     ).all()
     return teams

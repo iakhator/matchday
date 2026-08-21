@@ -19,6 +19,13 @@ class SyncService:
     Every fetch tries connectors in registry order and falls through to the
     next one on failure, so a single upstream outage doesn't take the whole
     gateway down.
+
+    League/Team/Fixture ids are the provider's own stable numeric ids
+    (confirmed these never change across seasons - see each model's
+    docstring), so upserts here resolve rows by that id directly instead of
+    a league+season-scoped lookup. Standing/PlayerStat keep synthetic UUID
+    ids since a "this team's standing this season" row has no natural id of
+    its own from the provider.
     """
 
     def __init__(self, session: AsyncSession):
@@ -43,16 +50,11 @@ class SyncService:
             [(c, c.fetch_league(competition_code)) for c in connectors],
         )
 
-        existing = (
-            await self.session.exec(
-                select(League).where(
-                    League.source == connector.source,
-                    League.external_ref == normalized.external_ref,
-                )
-            )
-        ).first()
+        existing = await self.session.get(League, normalized.external_id)
 
         if existing:
+            existing.source = connector.source
+            existing.external_ref = normalized.external_ref
             existing.name = normalized.name
             existing.country = normalized.country
             existing.logo = normalized.logo
@@ -61,6 +63,7 @@ class SyncService:
             league = existing
         else:
             league = League(
+                id=normalized.external_id,
                 source=connector.source,
                 external_ref=normalized.external_ref,
                 name=normalized.name,
@@ -89,32 +92,41 @@ class SyncService:
             or [(c, c.fetch_teams(league.external_ref, season_year)) for c in connectors],
         )
 
+        candidate_ids = [int(t.external_ref) for t in normalized_teams]
         existing_rows = (
-            await self.session.exec(
-                select(Team).where(
-                    Team.league_id == league.id, Team.season_year == season_year
+            (
+                await self.session.exec(
+                    select(Team).where(Team.id.in_(candidate_ids))
                 )
-            )
-        ).all()
-        existing_by_ref = {t.external_ref: t for t in existing_rows}
+            ).all()
+            if candidate_ids
+            else []
+        )
+        existing_by_id = {t.id: t for t in existing_rows}
 
         teams = []
         for normalized in normalized_teams:
-            existing = existing_by_ref.get(normalized.external_ref)
+            team_id = int(normalized.external_ref)
+            existing = existing_by_id.get(team_id)
             if existing:
                 existing.name = normalized.name
                 existing.short_name = normalized.short_name
                 existing.code = normalized.code
                 existing.logo = normalized.logo
                 existing.venue = normalized.venue
+                # A club can move between leagues (promotion/relegation) -
+                # this keeps "current league/season" accurate without
+                # duplicating the team row. See Team's docstring.
+                existing.league_id = league.id
+                existing.season_year = season_year
                 existing.updated_at = utcnow()
                 team = existing
             else:
                 team = Team(
+                    id=team_id,
+                    source=connector.source,
                     league_id=league.id,
                     season_year=season_year,
-                    source=connector.source,
-                    external_ref=normalized.external_ref,
                     name=normalized.name,
                     short_name=normalized.short_name,
                     code=normalized.code,
@@ -130,6 +142,16 @@ class SyncService:
 
         logger.info(f"Synced {len(teams)} teams for league {league.name}")
         return teams
+
+    async def _existing_team_ids(self, candidate_ids: List[int]) -> set:
+        if not candidate_ids:
+            return set()
+        rows = (
+            await self.session.exec(
+                select(Team.id).where(Team.id.in_(candidate_ids))
+            )
+        ).all()
+        return set(rows)
 
     async def sync_fixtures(
         self,
@@ -151,37 +173,37 @@ class SyncService:
             ],
         )
 
-        team_rows = (
-            await self.session.exec(
-                select(Team).where(
-                    Team.league_id == league.id, Team.season_year == season_year
-                )
-            )
-        ).all()
-        team_id_by_ref = {t.external_ref: t.id for t in team_rows}
+        team_candidates = {
+            int(f.home_team_external_ref) for f in normalized_fixtures
+        } | {int(f.away_team_external_ref) for f in normalized_fixtures}
+        valid_team_ids = await self._existing_team_ids(list(team_candidates))
 
+        fixture_ids = [int(f.external_ref) for f in normalized_fixtures]
         existing_rows = (
-            await self.session.exec(
-                select(Fixture).where(
-                    Fixture.league_id == league.id, Fixture.season_year == season_year
+            (
+                await self.session.exec(
+                    select(Fixture).where(Fixture.id.in_(fixture_ids))
                 )
-            )
-        ).all()
-        existing_by_ref = {f.external_ref: f for f in existing_rows}
+            ).all()
+            if fixture_ids
+            else []
+        )
+        existing_by_id = {f.id: f for f in existing_rows}
 
         fixtures = []
         skipped = 0
         for normalized in normalized_fixtures:
-            home_team_id = team_id_by_ref.get(normalized.home_team_external_ref)
-            away_team_id = team_id_by_ref.get(normalized.away_team_external_ref)
-            if not home_team_id or not away_team_id:
+            home_team_id = int(normalized.home_team_external_ref)
+            away_team_id = int(normalized.away_team_external_ref)
+            if home_team_id not in valid_team_ids or away_team_id not in valid_team_ids:
                 # Team hasn't been synced yet (e.g. promoted/relegated club
                 # not yet in this season's roster) - skip until sync_teams
                 # catches up rather than writing a broken fixture row.
                 skipped += 1
                 continue
 
-            existing = existing_by_ref.get(normalized.external_ref)
+            fixture_id = int(normalized.external_ref)
+            existing = existing_by_id.get(fixture_id)
             if existing:
                 existing.matchday = normalized.matchday
                 existing.status = normalized.status
@@ -194,11 +216,11 @@ class SyncService:
                 fixture = existing
             else:
                 fixture = Fixture(
+                    id=fixture_id,
                     league_id=league.id,
                     season_year=season_year,
                     matchday=normalized.matchday,
                     source=connector.source,
-                    external_ref=normalized.external_ref,
                     home_team_id=home_team_id,
                     away_team_id=away_team_id,
                     kickoff_at=normalized.kickoff_at,
@@ -237,14 +259,9 @@ class SyncService:
             ],
         )
 
-        team_rows = (
-            await self.session.exec(
-                select(Team).where(
-                    Team.league_id == league.id, Team.season_year == season_year
-                )
-            )
-        ).all()
-        team_id_by_ref = {t.external_ref: t.id for t in team_rows}
+        valid_team_ids = await self._existing_team_ids(
+            [int(s.team_external_ref) for s in normalized_standings]
+        )
 
         existing_rows = (
             await self.session.exec(
@@ -258,8 +275,8 @@ class SyncService:
         standings = []
         skipped = 0
         for normalized in normalized_standings:
-            team_id = team_id_by_ref.get(normalized.team_external_ref)
-            if not team_id:
+            team_id = int(normalized.team_external_ref)
+            if team_id not in valid_team_ids:
                 # Same reasoning as sync_fixtures - a team not yet in this
                 # season's roster (sync_teams hasn't caught up). Skip rather
                 # than write a standing row with no valid team.
@@ -327,27 +344,21 @@ class SyncService:
             ],
         )
 
-        team_rows = (
-            await self.session.exec(
-                select(Team).where(
-                    Team.league_id == league.id, Team.season_year == season_year
-                )
-            )
-        ).all()
-        team_id_by_ref = {t.external_ref: t.id for t in team_rows}
-        team_ids = list(team_id_by_ref.values())
+        valid_team_ids = await self._existing_team_ids(
+            [int(s.team_external_ref) for s in normalized_stats]
+        )
 
         existing_rows = (
             (
                 await self.session.exec(
                     select(PlayerStat).where(
-                        PlayerStat.team_id.in_(team_ids),
+                        PlayerStat.team_id.in_(valid_team_ids),
                         PlayerStat.season_year == season_year,
                         PlayerStat.source == connector.source,
                     )
                 )
             ).all()
-            if team_ids
+            if valid_team_ids
             else []
         )
         existing_by_key = {(s.team_id, s.external_ref): s for s in existing_rows}
@@ -355,8 +366,8 @@ class SyncService:
         stats = []
         skipped = 0
         for normalized in normalized_stats:
-            team_id = team_id_by_ref.get(normalized.team_external_ref)
-            if not team_id:
+            team_id = int(normalized.team_external_ref)
+            if team_id not in valid_team_ids:
                 skipped += 1
                 continue
 
@@ -457,11 +468,13 @@ class SyncService:
             league.external_ref, season_year
         )
 
+        # Not season-filtered - Team rows track their *current* league/
+        # season only, and a backfill can target a season that's since
+        # moved on. league_id alone is a good enough proxy for "teams
+        # relevant to this competition" here.
         team_rows = (
             await self.session.exec(
-                select(Team).where(
-                    Team.league_id == league.id, Team.season_year == season_year
-                )
+                select(Team).where(Team.league_id == league.id)
             )
         ).all()
         team_id_by_ref = {}

@@ -4,6 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.auth import require_api_key
 from app.core.scheduler_config import SchedulerConfig
 from app.db.database import get_session
+from app.db.models import Fixture
 from app.services.sync_service import SyncService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -61,7 +62,7 @@ async def trigger_backfill(
     """Manually-triggered emergency path - never run automatically. Use
     this after football-data.org has been down, to fill in final scores
     for fixtures that were played while it was unreachable. Requires
-    ENABLE_SOCCERDATA_FALLBACK=true (off by default - see README for the
+    ENABLE_SOCCERDATA=true (off by default - see README for the
     tradeoff before enabling it)."""
     sync_service = SyncService(session)
     league = await sync_service.sync_league(competition_code)
@@ -76,3 +77,23 @@ async def trigger_backfill(
         raise HTTPException(status_code=503, detail=str(e)) from e
 
     return {"competition": competition_code, **result}
+
+
+@router.post("/enrich-fixture/{fixture_id}")
+async def trigger_fixture_enrichment(
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_api_key),
+):
+    """Manually (re-)run Understat post-match enrichment for one already-
+    finished fixture - the automatic path only fires reactively when a
+    fixture's status transitions to finished during a sync, so this is
+    useful for backfilling fixtures that finished before ENABLE_SOCCERDATA
+    was turned on. Requires ENABLE_SOCCERDATA=true."""
+    sync_service = SyncService(session)
+    fixture = await session.get(Fixture, fixture_id)
+    if not fixture:
+        raise HTTPException(status_code=404, detail="Fixture not found")
+
+    enriched = await sync_service.sync_fixture_stats(fixture)
+    return {"fixture_id": fixture_id, "enriched": enriched}

@@ -52,7 +52,7 @@ class SoccerDataSofascoreConnector(Connector):
     - soccerdata's HTTP layer spoofs TLS fingerprints (via `tls_requests` /
       bogdanfinn/tls-client) to get past Sofascore's bot detection. That's
       a materially different risk than calling a documented API with a
-      key. Only importable when ENABLE_SOCCERDATA_FALLBACK=true - see
+      key. Only importable when ENABLE_SOCCERDATA=true - see
       README for the tradeoff before enabling it.
     """
 

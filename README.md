@@ -128,7 +128,7 @@ To use it:
 
 ```bash
 uv sync --extra soccerdata
-# set ENABLE_SOCCERDATA_FALLBACK=true in .env.local
+# set ENABLE_SOCCERDATA=true in .env.local
 
 curl -X POST "http://localhost:8010/api/v1/admin/backfill-results?competition_code=PL"
 ```

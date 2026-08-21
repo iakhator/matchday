@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # TLS fingerprints to get past Sofascore's bot detection - a real
     # tradeoff, not just an extra data source. Requires the optional
     # `soccerdata` dependency group. See README before enabling.
-    ENABLE_SOCCERDATA_FALLBACK: bool = False
+    ENABLE_SOCCERDATA: bool = False
 
     @property
     def gateway_api_keys(self) -> List[str]:

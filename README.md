@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/banner.png" alt="Matchday" width="600">
+  <img src="docs/assets/banner.svg" alt="Matchday" width="600">
 
   <p><strong>A self-hosted football (soccer) data gateway.</strong></p>
 
@@ -31,7 +31,7 @@ Third-party football data APIs (api-sports.io, Sportmonks, etc.) work, but
 they're a single point of failure and a recurring cost. This gateway sits
 between your app and the upstream data source(s):
 
-```
+```text
 Your app  -->  matchday-gateway (this repo)  -->  connector(s)  -->  upstream provider(s)
 ```
 
@@ -44,7 +44,7 @@ failure automatically.
 ## What it does (and doesn't) solve
 
 | Data | Handled here? |
-|---|---|
+| --- | --- |
 | Leagues, teams | Yes - synced daily |
 | Fixtures/schedule (including postponements/reschedules) | Yes - synced continuously |
 | Scores/results | Yes - synced continuously |
@@ -128,7 +128,7 @@ To use it:
 
 ```bash
 uv sync --extra soccerdata
-# set ENABLE_SOCCERDATA=true in .env.local
+# set ENABLE_SOCCERDATA_FALLBACK=true in .env.local
 
 curl -X POST "http://localhost:8010/api/v1/admin/backfill-results?competition_code=PL"
 ```

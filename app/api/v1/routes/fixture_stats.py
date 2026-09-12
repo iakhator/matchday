@@ -5,6 +5,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.auth import require_api_key
 from app.db.database import get_session
 from app.db.models import Fixture, PlayerMatchStat, ShotEvent, TeamMatchStat
+from app.schemas.goal import GoalListResponse, GoalOut
 from app.schemas.player_match_stat import (
     PlayerMatchStatListResponse,
     PlayerMatchStatOut,
@@ -79,3 +80,99 @@ async def list_shot_events(
     ).all()
     items = [ShotEventOut.model_validate(row) for row in rows]
     return ShotEventListResponse(items=items, total=len(items))
+
+
+@router.get("/goals", response_model=GoalListResponse)
+async def list_goals(
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: str = Depends(require_api_key),
+):
+    """Goal events for a fixture: scorer, assister and minute.
+
+    Derived from the shot data rather than fetched separately.
+    football-data.org exposes no goal events at all on the current tier -
+    `/matches/{id}` has no `goals`, `bookings` or `substitutions` key, so
+    there is nothing there to sync. Understat's shot feed already carries
+    everything a goal event needs, and more (xG, body part, assister), so
+    this reads it rather than adding another upstream dependency.
+
+    That means the same caveat as every other Understat-backed endpoint:
+    empty unless `ENABLE_SOCCERDATA=true` and the competition is one
+    Understat covers. Check `enriched` before concluding a match was
+    goalless - see `GoalListResponse`.
+    """
+    fixture = await _require_fixture(fixture_id, session)
+
+    shots = (
+        await session.exec(
+            select(ShotEvent)
+            .where(ShotEvent.fixture_id == fixture_id)
+            .order_by(ShotEvent.minute)
+        )
+    ).all()
+
+    # Any shot at all means the fixture was enriched, so an empty goal list
+    # is a genuine 0-0 rather than missing data. Falling back to team stats
+    # covers the vanishingly rare match with no shots recorded.
+    enriched = bool(shots)
+    if not enriched:
+        enriched = (
+            await session.exec(
+                select(TeamMatchStat).where(TeamMatchStat.fixture_id == fixture_id)
+            )
+        ).first() is not None
+
+    goals = []
+    seen = set()
+    for shot in shots:
+        if shot.result not in ("Goal", "Own Goal"):
+            continue
+
+        # Upstream occasionally records one goal as two shots with
+        # different ids - seen on 1 of 87 enriched fixtures, where every
+        # goal was duplicated and the derived score came out at exactly
+        # double the real one (4-6 for a match that finished 2-3). The
+        # rows are genuinely distinct by id, so the upsert cannot catch it.
+        #
+        # The same player scoring twice in the same minute with the same
+        # outcome is not a thing that happens; a double-recorded event is.
+        # Collapsing on that is the safer reading, and serving a wrong
+        # scoreline is the worse failure.
+        signature = (shot.minute, shot.player_name, shot.result)
+        if signature in seen:
+            continue
+        seen.add(signature)
+
+        own_goal = shot.result == "Own Goal"
+        # Credit an own goal to the opponent. Verified against a real 4-0:
+        # three goals recorded for the home side plus one own goal recorded
+        # against the away side adds up to the four the scoreline shows.
+        if own_goal:
+            credited = (
+                fixture.away_team_id
+                if shot.team_id == fixture.home_team_id
+                else fixture.home_team_id
+            )
+        else:
+            credited = shot.team_id
+
+        goals.append(
+            GoalOut(
+                minute=shot.minute,
+                player_name=shot.player_name,
+                assist_player_name=shot.assist_player_name,
+                team_id=credited,
+                player_team_id=shot.team_id,
+                is_own_goal=own_goal,
+                xg=shot.xg,
+            )
+        )
+
+    return GoalListResponse(
+        fixture_id=fixture_id,
+        enriched=enriched,
+        source=shots[0].source if shots else None,
+        items=goals,
+        total=len(goals),
+    )

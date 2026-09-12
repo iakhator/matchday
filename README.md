@@ -21,6 +21,7 @@ third-party vendor.
 - [Data licensing and attribution](#data-licensing-and-attribution)
 - [Architecture](#architecture)
 - [Adding a connector](#adding-a-connector)
+- [Mapping ids from another provider](#mapping-ids-from-another-provider)
 - [Local development](#local-development)
 - [Backfill fallback](#backfill-fallback-optional-off-by-default)
 - [Consuming this from another app](#consuming-this-from-another-app)
@@ -152,6 +153,62 @@ Implement `app/connectors/base.py::Connector` (three methods:
 normalized Pydantic models defined in the same file), then add it to
 `app/connectors/registry.py::get_connectors()`. The sync service, scheduler
 and REST API don't need to change.
+
+If the new source hands over its own identifiers, nothing else is needed -
+the sync path records them in `external_ids` automatically. If it only
+gives names, see below.
+
+## Mapping ids from another provider
+
+A source that identifies clubs by name rather than by id has to be matched
+against what this gateway already knows, and matching names across
+providers is not reliable enough to do unattended. Comparing this gateway
+to another provider's dataset, a reasonable normalizer matched 36 of 40
+fixtures and silently missed 4 - all one club, `Brighton` against
+`Brighton & Hove Albion FC`. That failed safe by finding nothing; a looser
+rule matches the *wrong* club just as quietly, and every consumer's
+reference is then wrong with nothing to indicate it.
+
+So mapping is proposed automatically and confirmed by hand:
+
+```bash
+# 1. propose - match names, write unverified mappings, emit a review file
+python scripts/seed_external_ids.py propose \
+    --source api_sports --input their_teams.json --out review.json
+
+# 2. review - open review.json, check each row, set "approved": true
+
+# 3. approve - import the reviewed file
+python scripts/seed_external_ids.py approve --input review.json
+
+python scripts/seed_external_ids.py pending   # what is still unreviewed
+```
+
+`their_teams.json` is just the other provider's teams:
+
+```json
+[{"external_id": "42", "name": "Brighton & Hove Albion"}]
+```
+
+The review file groups rows by what you actually have to do - confirm a
+match, choose between candidates, or find one by hand - and is stable for
+the same input, so a re-run diffs cleanly against the last one. Being a
+file rather than a prompt means the review is committable and
+attributable: when a mapping later turns out to be wrong, "who approved
+this and what did it look like?" has an answer.
+
+**Unverified mappings are invisible to the sync path.** A guessed mapping
+is fine for a lookup, where a human is reading the answer and the
+`verified` flag travels with it. It is not fine for writing fixtures, so
+`SyncService` resolves with `verified_only=True` and skips anything
+unconfirmed - the same behaviour it already has for a team it has never
+seen. Nothing that is merely plausible ends up in data consumers depend
+on.
+
+Only confident matches are written at all. Weak, ambiguous and unmatched
+rows are reported for review but deliberately not stored: an absent
+mapping is honest about not knowing, while a weak guess sitting in the
+table looks like knowledge.
 
 ## Local development
 

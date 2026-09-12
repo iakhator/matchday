@@ -24,22 +24,37 @@ class IdMapper:
         self.session = session
 
     async def resolve(
-        self, entity_type: str, source: str, external_ref: str
+        self,
+        entity_type: str,
+        source: str,
+        external_ref: str,
+        verified_only: bool = False,
     ) -> Optional[int]:
-        """Gateway id for one provider ref, or None if never seen."""
-        row = (
-            await self.session.exec(
-                select(ExternalId).where(
-                    ExternalId.entity_type == entity_type,
-                    ExternalId.source == source,
-                    ExternalId.external_id == str(external_ref),
-                )
-            )
-        ).first()
+        """Gateway id for one provider ref, or None if never seen.
+
+        `verified_only` excludes mappings that were guessed from names and
+        not yet reviewed. The sync path sets it: writing a fixture against
+        a guessed team mapping produces data that is silently wrong, and
+        skipping is the behaviour it already has for unknown refs. Lookups
+        leave it off, because there a human is reading the answer and the
+        `verified` flag travels with it.
+        """
+        query = select(ExternalId).where(
+            ExternalId.entity_type == entity_type,
+            ExternalId.source == source,
+            ExternalId.external_id == str(external_ref),
+        )
+        if verified_only:
+            query = query.where(ExternalId.verified == True)  # noqa: E712
+        row = (await self.session.exec(query)).first()
         return row.internal_id if row else None
 
     async def resolve_many(
-        self, entity_type: str, source: str, external_refs: List[str]
+        self,
+        entity_type: str,
+        source: str,
+        external_refs: List[str],
+        verified_only: bool = False,
     ) -> Dict[str, int]:
         """Bulk `resolve`, keyed by ref.
 
@@ -51,15 +66,14 @@ class IdMapper:
         if not refs:
             return {}
 
-        rows = (
-            await self.session.exec(
-                select(ExternalId).where(
-                    ExternalId.entity_type == entity_type,
-                    ExternalId.source == source,
-                    ExternalId.external_id.in_(refs),
-                )
-            )
-        ).all()
+        query = select(ExternalId).where(
+            ExternalId.entity_type == entity_type,
+            ExternalId.source == source,
+            ExternalId.external_id.in_(refs),
+        )
+        if verified_only:
+            query = query.where(ExternalId.verified == True)  # noqa: E712
+        rows = (await self.session.exec(query)).all()
         return {row.external_id: row.internal_id for row in rows}
 
     async def link(

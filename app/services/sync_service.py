@@ -66,7 +66,8 @@ class SyncService:
         )
 
         internal_id = await self.ids.resolve(
-            EntityType.LEAGUE, connector.source, normalized.external_id
+            EntityType.LEAGUE, connector.source, normalized.external_id,
+            verified_only=True,
         )
         existing = await self.session.get(League, internal_id) if internal_id else None
 
@@ -120,6 +121,7 @@ class SyncService:
             EntityType.TEAM,
             connector.source,
             [t.external_ref for t in normalized_teams],
+            verified_only=True,
         )
         existing_rows = (
             (
@@ -211,7 +213,7 @@ class SyncService:
             f.away_team_external_ref for f in normalized_fixtures
         }
         team_ids_by_ref = await self.ids.resolve_many(
-            EntityType.TEAM, connector.source, list(team_refs)
+            EntityType.TEAM, connector.source, list(team_refs), verified_only=True
         )
         valid_team_ids = await self._existing_team_ids(list(team_ids_by_ref.values()))
 
@@ -219,6 +221,7 @@ class SyncService:
             EntityType.FIXTURE,
             connector.source,
             [f.external_ref for f in normalized_fixtures],
+            verified_only=True,
         )
         existing_rows = (
             (
@@ -335,6 +338,7 @@ class SyncService:
             EntityType.TEAM,
             connector.source,
             [s.team_external_ref for s in normalized_standings],
+            verified_only=True,
         )
         valid_team_ids = await self._existing_team_ids(list(team_ids_by_ref.values()))
 
@@ -423,6 +427,7 @@ class SyncService:
             EntityType.TEAM,
             connector.source,
             [s.team_external_ref for s in normalized_stats],
+            verified_only=True,
         )
         valid_team_ids = await self._existing_team_ids(list(team_ids_by_ref.values()))
 

@@ -10,3 +10,4 @@ logs/
 *.log
 .DS_Store
 uv.lock.bak
+downloaded_files/

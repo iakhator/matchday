@@ -2,6 +2,7 @@ from app.db.models.fixture import Fixture
 from app.db.models.league import League
 from app.db.models.player_match_stat import PlayerMatchStat
 from app.db.models.player_stat import PlayerStat
+from app.db.models.scheduler_heartbeat import SchedulerHeartbeat
 from app.db.models.shot_event import ShotEvent
 from app.db.models.standing import Standing
 from app.db.models.team import Team
@@ -16,4 +17,5 @@ __all__ = [
     "PlayerMatchStat",
     "TeamMatchStat",
     "ShotEvent",
+    "SchedulerHeartbeat",
 ]

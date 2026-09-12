@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.auth import require_api_key
+from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.db.database import get_session
 from app.db.models import Fixture
@@ -17,38 +18,49 @@ async def trigger_sync(
 ):
     """Manually trigger a full sync of every tracked competition. Useful for
     self-hosters getting a fresh gateway populated without waiting for the
-    scheduler's next tick, and for local dev/testing."""
+    scheduler's next tick, and for local dev/testing.
+
+    One competition failing (e.g. hitting football-data.org's rate limit
+    partway through a multi-competition batch) doesn't abort the rest -
+    each is synced independently and reported, same as the scheduler jobs.
+    """
     sync_service = SyncService(session)
     results = []
 
     for code in SchedulerConfig.TRACKED_COMPETITIONS:
-        league = await sync_service.sync_league(code)
-        teams = []
-        fixtures = []
-        standings = []
-        player_stats = []
-        if league.current_season_year:
-            teams = await sync_service.sync_teams(league, league.current_season_year)
-            fixtures = await sync_service.sync_fixtures(
-                league, league.current_season_year
+        try:
+            league = await sync_service.sync_league(code)
+            teams = []
+            fixtures = []
+            standings = []
+            player_stats = []
+            if league.current_season_year:
+                teams = await sync_service.sync_teams(
+                    league, league.current_season_year
+                )
+                fixtures = await sync_service.sync_fixtures(
+                    league, league.current_season_year
+                )
+                standings = await sync_service.sync_standings(
+                    league, league.current_season_year
+                )
+                player_stats = await sync_service.sync_player_stats(
+                    league, league.current_season_year
+                )
+            results.append(
+                {
+                    "competition": code,
+                    "league": league.name,
+                    "season": league.current_season_year,
+                    "teams_synced": len(teams),
+                    "fixtures_synced": len(fixtures),
+                    "standings_synced": len(standings),
+                    "player_stats_synced": len(player_stats),
+                }
             )
-            standings = await sync_service.sync_standings(
-                league, league.current_season_year
-            )
-            player_stats = await sync_service.sync_player_stats(
-                league, league.current_season_year
-            )
-        results.append(
-            {
-                "competition": code,
-                "league": league.name,
-                "season": league.current_season_year,
-                "teams_synced": len(teams),
-                "fixtures_synced": len(fixtures),
-                "standings_synced": len(standings),
-                "player_stats_synced": len(player_stats),
-            }
-        )
+        except Exception as e:
+            logger.exception(f"Admin sync failed for '{code}'")
+            results.append({"competition": code, "error": str(e)})
 
     return {"results": results}
 

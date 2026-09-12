@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
 from app.db.database import get_session
 from app.db.models import League, Team
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/leagues/{league_id}/teams", tags=["teams"])
 async def list_teams(
     league_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Always the *current* roster - Team rows aren't season-scoped (a
     club keeps the same id forever, see the Team model's docstring), so

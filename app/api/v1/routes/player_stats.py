@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
 from app.db.database import get_session
 from app.db.models import League, PlayerStat, Team
@@ -23,7 +24,7 @@ async def list_player_stats(
     ),
     limit: int = Query(50, le=100),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     league = await session.get(League, league_id)
     if not league:

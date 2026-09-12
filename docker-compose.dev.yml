@@ -30,6 +30,14 @@ services:
       - "8010:8010"
     env_file:
       - .env.local
+    environment:
+      # Local development runs without auth. The gateway fails closed
+      # otherwise - with no keys configured and no explicit opt-out it
+      # refuses every request, so a deployment that forgets to set
+      # GATEWAY_API_KEYS cannot quietly serve itself to anyone who finds
+      # it. This line is what makes that safe default painless here, and
+      # it is deliberately not in .env.example.
+      GATEWAY_ALLOW_ANONYMOUS: "true"
     depends_on:
       postgres:
         condition: service_healthy

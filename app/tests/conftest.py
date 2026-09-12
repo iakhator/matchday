@@ -1,5 +1,6 @@
 from typing import AsyncGenerator
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
@@ -22,6 +23,24 @@ from app.db.models import (  # noqa: F401
 )
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@pytest.fixture(autouse=True)
+def _allow_anonymous(monkeypatch):
+    """Run route tests without auth.
+
+    The gateway fails closed: no keys configured and no explicit opt-out
+    means every request is refused. That is deliberate, and it is what the
+    tests in test_auth.py cover - they turn this back off where the
+    behaviour under test is the refusal itself.
+
+    Everything else is testing an endpoint, not the door, so it opts out
+    the same way local development does.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "GATEWAY_ALLOW_ANONYMOUS", True)
+    monkeypatch.setattr(settings, "GATEWAY_API_KEYS", "")
 
 
 @pytest_asyncio.fixture(scope="function")

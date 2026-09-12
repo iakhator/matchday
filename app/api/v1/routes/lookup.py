@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
 from app.db.database import get_session
 from app.db.models import EntityType
@@ -37,7 +38,7 @@ async def lookup(
         description="Provider id, or several separated by commas",
     ),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Translate another provider's ids into this gateway's.
 
@@ -77,7 +78,7 @@ async def aliases(
     entity_type: str,
     internal_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Every provider id known for one gateway row.
 

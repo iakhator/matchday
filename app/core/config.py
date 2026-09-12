@@ -15,9 +15,21 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://gateway_user:dev_password@localhost:5433/matchday_gateway_dev"
     )
 
-    # Comma-separated list of keys allowed to call this gateway's API.
-    # Leave empty in development to disable auth entirely.
+    # Keys allowed to call this gateway's API, comma separated, each as
+    # `name:secret` or `name:secret:requests_per_minute`. A bare secret
+    # with no name still works - see app/core/api_keys.py.
+    #
+    #   GATEWAY_API_KEYS="predify:s3cret:120,analytics:other:30"
     GATEWAY_API_KEYS: str = ""
+
+    # Run without auth. Only for local development: with this false and no
+    # keys configured, the gateway refuses every request rather than
+    # serving itself openly to whoever finds it.
+    GATEWAY_ALLOW_ANONYMOUS: bool = False
+
+    # Applied to any key that does not state its own limit. Sized for an
+    # app polling live scores, not for bulk export.
+    DEFAULT_RATE_LIMIT_PER_MINUTE: int = 120
 
     # Upstream connector credentials
     FOOTBALL_DATA_ORG_API_KEY: Optional[str] = None

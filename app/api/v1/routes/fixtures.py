@@ -22,7 +22,8 @@ async def list_fixtures(
     ),
     matchday: Optional[int] = Query(None),
     status: Optional[str] = Query(
-        None, description="scheduled | live | finished | postponed | suspended | cancelled"
+        None,
+        description="scheduled | live | finished | postponed | suspended | cancelled",
     ),
     session: AsyncSession = Depends(get_session),
     _: str = Depends(require_api_key),

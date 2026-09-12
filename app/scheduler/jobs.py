@@ -1,3 +1,4 @@
+from app.core.heartbeat import record_heartbeat
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.db.database import async_session
@@ -7,6 +8,7 @@ from app.services.sync_service import SyncService
 async def sync_leagues_and_teams_job() -> None:
     """Slow-cadence job: refresh league metadata + current season's team
     roster for every tracked competition."""
+    synced = 0
     async with async_session() as session:
         sync_service = SyncService(session)
         for code in SchedulerConfig.TRACKED_COMPETITIONS:
@@ -14,14 +16,22 @@ async def sync_leagues_and_teams_job() -> None:
                 league = await sync_service.sync_league(code)
                 if league.current_season_year:
                     await sync_service.sync_teams(league, league.current_season_year)
+                synced += 1
             except Exception:
                 logger.exception(f"League/team sync failed for '{code}'")
+        # Only a heartbeat if at least one competition actually synced -
+        # an upstream/connector outage that fails every competition every
+        # run should go stale and alert, not look healthy just because
+        # the job function itself didn't crash. See app/core/heartbeat.py.
+        if synced:
+            await record_heartbeat(session, "sync_leagues_and_teams")
 
 
 async def sync_fixtures_job() -> None:
     """Frequent-cadence job: refresh fixtures/scores for every tracked
     competition's current season. This is the job that keeps postponements,
     reschedules and results flowing continuously."""
+    synced = 0
     async with async_session() as session:
         sync_service = SyncService(session)
         for code in SchedulerConfig.TRACKED_COMPETITIONS:
@@ -31,13 +41,17 @@ async def sync_fixtures_job() -> None:
                     await sync_service.sync_fixtures(
                         league, league.current_season_year
                     )
+                synced += 1
             except Exception:
                 logger.exception(f"Fixture sync failed for '{code}'")
+        if synced:
+            await record_heartbeat(session, "sync_fixtures")
 
 
 async def sync_standings_and_players_job() -> None:
     """Medium-cadence job: refresh league tables and season scorer stats for
     every tracked competition's current season."""
+    synced = 0
     async with async_session() as session:
         sync_service = SyncService(session)
         for code in SchedulerConfig.TRACKED_COMPETITIONS:
@@ -50,8 +64,11 @@ async def sync_standings_and_players_job() -> None:
                     await sync_service.sync_player_stats(
                         league, league.current_season_year
                     )
+                synced += 1
             except Exception:
                 logger.exception(f"Standings/player stats sync failed for '{code}'")
+        if synced:
+            await record_heartbeat(session, "sync_standings_and_players")
 
 
 async def sync_live_fixtures_job() -> None:
@@ -62,6 +79,7 @@ async def sync_live_fixtures_job() -> None:
     runs every tick at zero upstream cost when nothing's on."""
     async with async_session() as session:
         sync_service = SyncService(session)
+        checked_ok = True
         for code in SchedulerConfig.TRACKED_COMPETITIONS:
             try:
                 if not await sync_service.has_live_window_fixtures(code):
@@ -73,3 +91,10 @@ async def sync_live_fixtures_job() -> None:
                     )
             except Exception:
                 logger.exception(f"Live fixture sync failed for '{code}'")
+                checked_ok = False
+        # Unlike the other jobs, "nothing was live" is a normal, successful
+        # outcome here (that's the whole point of the cheap DB check) - so
+        # the heartbeat fires as long as the DB check itself didn't blow up,
+        # not just when an upstream sync actually happened.
+        if checked_ok:
+            await record_heartbeat(session, "sync_live_fixtures")

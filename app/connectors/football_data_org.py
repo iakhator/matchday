@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -41,11 +42,39 @@ class FootballDataOrgConnector(Connector):
         self._base_url = settings.FOOTBALL_DATA_ORG_BASE_URL
         self._headers = {"X-Auth-Token": settings.FOOTBALL_DATA_ORG_API_KEY}
 
+    # football-data.org's free tier allows 10 requests/minute. A burst
+    # (e.g. admin sync across several tracked competitions, or scheduler
+    # jobs landing at the same time) can exceed that well within a single
+    # gateway operation, so 429s here are routine, not exceptional -
+    # retry with the delay the API itself tells us to use instead of
+    # failing the whole sync.
+    _MAX_RETRIES = 3
+    _DEFAULT_RETRY_AFTER_SECONDS = 60
+
     async def _get(self, path: str, params: Optional[dict] = None) -> dict:
         async with httpx.AsyncClient(base_url=self._base_url, timeout=15.0) as client:
-            response = await client.get(path, headers=self._headers, params=params)
-            response.raise_for_status()
-            return response.json()
+            for attempt in range(self._MAX_RETRIES + 1):
+                response = await client.get(path, headers=self._headers, params=params)
+                if response.status_code != 429:
+                    response.raise_for_status()
+                    return response.json()
+
+                if attempt == self._MAX_RETRIES:
+                    response.raise_for_status()
+
+                retry_after = response.headers.get("Retry-After")
+                wait_seconds = (
+                    int(retry_after) if retry_after and retry_after.isdigit()
+                    else self._DEFAULT_RETRY_AFTER_SECONDS
+                )
+                logger.warning(
+                    f"football-data.org rate limit hit on {path} "
+                    f"(attempt {attempt + 1}/{self._MAX_RETRIES + 1}) - "
+                    f"waiting {wait_seconds}s before retrying"
+                )
+                await asyncio.sleep(wait_seconds)
+
+            raise RuntimeError("unreachable")  # loop always returns or raises
 
     async def fetch_league(self, competition_code: str) -> NormalizedLeague:
         data = await self._get(f"/competitions/{competition_code}")

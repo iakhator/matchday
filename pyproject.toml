@@ -18,11 +18,13 @@ dependencies = [
 ]
 
 # Optional - only needed for the Sofascore backfill fallback
-# (app/connectors/soccerdata_sofascore.py). Not a base dependency: it pulls
-# in a compiled TLS-fingerprint-spoofing binary (bogdanfinn/tls-client via
-# the `tls_requests` package) used to get past Sofascore's bot detection.
-# Install with `uv sync --extra soccerdata` only if you're knowingly
-# enabling ENABLE_SOCCERDATA_FALLBACK - see README.
+# (app/connectors/soccerdata_sofascore.py) and Understat post-match
+# enrichment (app/connectors/understat.py, xG/xA/PPDA/shot-map data).
+# Not a base dependency: it pulls in a compiled TLS-fingerprint-spoofing
+# binary (bogdanfinn/tls-client via the `tls_requests` package) used to
+# get past bot detection on both sites. Install with
+# `uv sync --extra soccerdata` only if you're knowingly enabling
+# ENABLE_SOCCERDATA - see README.
 [project.optional-dependencies]
 soccerdata = ["soccerdata>=1.9.1"]
 

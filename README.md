@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/banner.png" alt="Matchday" width="600">
+  <img src="docs/assets/banner.svg" alt="Matchday" width="600">
 
   <p><strong>A self-hosted football (soccer) data gateway.</strong></p>
 
@@ -31,41 +31,63 @@ Third-party football data APIs (api-sports.io, Sportmonks, etc.) work, but
 they're a single point of failure and a recurring cost. This gateway sits
 between your app and the upstream data source(s):
 
-```
+```text
 Your app  -->  matchday-gateway (this repo)  -->  connector(s)  -->  upstream provider(s)
 ```
 
-The connector layer is a plugin interface (`app/connectors/base.py`) - swap
-or add upstream sources without touching your app at all. Ship with one
-connector, add more later (a second free API as a fallback, a scraper, a
-static seasonal dataset), and the gateway falls through to the next one on
-failure automatically.
+The connector layer is a plugin interface (`app/connectors/base.py`) -
+swap or add upstream sources without touching your app at all. Today it
+ships with exactly one registered connector (football-data.org); the
+fallback-chain behavior described below is implemented and tested
+(`SyncService._first_success`), but there's nothing to fall through to
+yet until a second general-purpose connector is added to
+`app/connectors/registry.py`. `understat.py` and `soccerdata_sofascore.py`
+already exist but serve narrower purposes - see "Backfill fallback" below
+- so they're deliberately not in that registry.
 
 ## What it does (and doesn't) solve
 
 | Data | Handled here? |
-|---|---|
+| --- | --- |
 | Leagues, teams | Yes - synced daily |
 | Fixtures/schedule (including postponements/reschedules) | Yes - synced continuously |
 | Scores/results | Yes - synced continuously |
-| Head-to-head, standings, "most predicted outcome" | **No** - these are derivable from your own app's historical match/prediction data. Compute them in your app, not here. |
-| Player stats, betting odds | Not yet - genuinely needs its own upstream feed. Left as a future connector; see below. |
+| Standings, season scorers (goals/assists/appearances) | Yes - synced on their own cadence, see below |
+| Advanced match stats (xG, xA, xG-chain/buildup, PPDA, shot maps) | Optional - via Understat, reactively enriched right when a fixture finishes. Off by default; see "Backfill fallback" below for the tradeoff |
+| Head-to-head, "most predicted outcome" | **No** - these are derivable from your own app's historical match/prediction data. Compute them in your app, not here. |
+| Betting odds | Not yet - genuinely needs its own upstream feed. Left as a future connector. |
 
 ## Architecture
 
-- `app/connectors/` - the plugin interface (`Connector` ABC) + one real
+- `app/connectors/` - the plugin interface (`Connector` ABC) + a real
   implementation against [football-data.org](https://www.football-data.org)
-  v4 (free tier, no credit card required).
+  v4 (free tier, no credit card required). `understat.py` (advanced stats)
+  and `soccerdata_sofascore.py` (results backfill) are separate,
+  narrower-purpose connectors - see "Backfill fallback" below.
 - `app/services/sync_service.py` - fetches from connectors (falling back to
   the next one in the registry on failure), normalizes, upserts into the DB.
-- `app/scheduler/` - APScheduler jobs: league/team metadata daily, fixtures
-  every 15 minutes, plus a fast live-score job every 60 seconds that only
-  calls the upstream API when a competition actually has a fixture in its
-  live window (cheap DB check first) - all configurable via
-  `SchedulerConfig`.
-- `app/api/v1/` - the REST API your app calls: `/leagues`,
-  `/leagues/{id}/teams`, `/leagues/{id}/fixtures`, `/fixtures/{id}`.
-  Gated by a simple `X-Gateway-Key` header (disabled by default in dev).
+- `app/scheduler/` - APScheduler jobs: league/team metadata daily,
+  fixtures every 15 minutes, standings + season scorer stats every 30
+  minutes, plus a fast live-score job every 60 seconds that only calls the
+  upstream API when a competition actually has a fixture in its live
+  window (cheap DB check first) - all configurable via `SchedulerConfig`.
+  Each job stamps a heartbeat on success; `GET /health/scheduler` reports
+  unhealthy the moment any job's heartbeat goes stale (see
+  `app/core/heartbeat.py`) - point an uptime monitor at it.
+- `app/api/v1/` - the REST API your app calls:
+  - `GET /leagues`, `GET /leagues/{id}`
+  - `GET /leagues/{id}/teams`
+  - `GET /leagues/{id}/fixtures`, `GET /fixtures/{id}`
+  - `GET /leagues/{id}/standings`
+  - `GET /leagues/{id}/players` (season scorer stats)
+  - `GET /fixtures/{id}/player-stats`, `GET /fixtures/{id}/team-stats`,
+    `GET /fixtures/{id}/shots` (Understat data, empty unless
+    `ENABLE_SOCCERDATA=true`)
+  - `POST /admin/sync`, `POST /admin/backfill-results`,
+    `POST /admin/enrich-fixture/{id}` (manual triggers)
+
+  All gated by a simple `X-Gateway-Key` header (disabled by default in
+  dev) - see `app/core/auth.py`.
 
 ## Adding a connector
 
@@ -85,7 +107,8 @@ cp .env.example .env.local
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-Runs on `http://localhost:8010`. Health check: `GET /health`.
+Runs on `http://localhost:8010`. Liveness: `GET /health`. Scheduler health
+(are the sync jobs actually still running): `GET /health/scheduler`.
 
 Trigger a manual sync (don't wait for the scheduler):
 
@@ -101,13 +124,35 @@ docker exec matchday_gateway_api_dev uv run alembic upgrade head
 docker exec matchday_gateway_api_dev uv run alembic revision --autogenerate -m "description"
 ```
 
+### Tests
+
+```bash
+docker exec matchday_gateway_api_dev uv run pytest app/tests/
+```
+
+Unit tests against an in-memory SQLite DB (no Postgres needed) - connector
+normalization (status mapping, standings table selection, field
+fallbacks), sync upsert/idempotency and unknown-team-ref skipping, the
+connector fallback chain, the Sofascore team-name slug matching, API-key
+auth, and the scheduler heartbeat logic itself.
+
 ## Backfill fallback (optional, off by default)
 
+One flag, `ENABLE_SOCCERDATA`, gates two separate `soccerdata`-powered
+connectors:
+
+- **Understat advanced stats** (`app/connectors/understat.py`) - runs
+  automatically, reactively, the moment a fixture's status flips to
+  finished during a normal sync. No manual step needed once the flag is
+  on.
+- **Sofascore results backfill** (`app/connectors/soccerdata_sofascore.py`,
+  described below) - manual admin call only, never automatic.
+
 If football-data.org is down while a match is played, its final score is
-missed. `app/connectors/soccerdata_sofascore.py` can backfill it after the
-fact from Sofascore, via a manual admin call - it is **not** part of the
-automatic sync chain. Three reasons it's handled this way instead of being
-just another connector in the registry:
+missed. The Sofascore connector can backfill it after the fact, via a
+manual admin call - it is **not** part of the automatic sync chain. Three
+reasons it's handled this way instead of being just another connector in
+the registry:
 
 1. It can only see FINISHED and NOT-YET-STARTED matches - Sofascore's
    live/in-play state isn't exposed by the library at all, so it can't
@@ -128,7 +173,7 @@ To use it:
 
 ```bash
 uv sync --extra soccerdata
-# set ENABLE_SOCCERDATA_FALLBACK=true in .env.local
+# set ENABLE_SOCCERDATA=true in .env.local
 
 curl -X POST "http://localhost:8010/api/v1/admin/backfill-results?competition_code=PL"
 ```
@@ -148,12 +193,21 @@ the consuming app once you're ready to lock it down.
 
 ## Status
 
-Early / MVP. Leagues, teams, fixtures and scores work end-to-end for
-Premier League and La Liga via football-data.org, with a fast 60-second
-live-score job on top of the 15-minute full sync. An optional, off-by-
-default backfill fallback (Sofascore, via `soccerdata`) can fill in missed
-final scores after an outage - see "Backfill fallback" above. Not yet
-wired into Predify's backend (that's the next step - swapping
-`football_api.py` in `predify/server` to call this gateway instead of
-api-sports.io directly). Player stats and odds connectors are not built
-yet.
+Early / MVP, but the core loop is solid. Leagues, teams, fixtures,
+scores, standings and season scorer stats all work end-to-end for the
+Premier League, La Liga and Bundesliga via football-data.org, with a fast
+60-second live-score job on top of the 15-minute full sync. Scheduler health is
+monitored (`GET /health/scheduler`) so a silently-dead sync job can't go
+unnoticed. Advanced match stats (xG/xA/PPDA/shot maps, via Understat) and
+an emergency results backfill (via Sofascore) are both optional, off by
+default - see "Backfill fallback" above. Unit-tested (`app/tests/`) -
+connector normalization, sync upsert/idempotency, the fallback chain, and
+the heartbeat monitoring itself.
+
+**Not yet wired into Predify's backend** - that's the deliberate next
+step, swapping `football_api.py` in `predify/server` to call this gateway
+instead of api-sports.io directly, once this repo is fully hardened.
+Odds are not built yet. The connector registry currently holds exactly
+one connector (football-data.org) - the fallback-chain mechanism itself
+is implemented and tested, but there's no second general-purpose source
+registered to fall through to yet.

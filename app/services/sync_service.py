@@ -9,7 +9,16 @@ from app.connectors.registry import get_connectors
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
-from app.db.models import Fixture, League, PlayerStat, Standing, Team
+from app.db.models import (
+    Fixture,
+    League,
+    PlayerMatchStat,
+    PlayerStat,
+    ShotEvent,
+    Standing,
+    Team,
+    TeamMatchStat,
+)
 from app.utils.datetime_utils import utcnow
 
 
@@ -191,6 +200,7 @@ class SyncService:
         existing_by_id = {f.id: f for f in existing_rows}
 
         fixtures = []
+        newly_finished = []
         skipped = 0
         for normalized in normalized_fixtures:
             home_team_id = int(normalized.home_team_external_ref)
@@ -205,6 +215,9 @@ class SyncService:
             fixture_id = int(normalized.external_ref)
             existing = existing_by_id.get(fixture_id)
             if existing:
+                just_finished = (
+                    existing.status != "finished" and normalized.status == "finished"
+                )
                 existing.matchday = normalized.matchday
                 existing.status = normalized.status
                 existing.raw_status = normalized.raw_status
@@ -215,6 +228,7 @@ class SyncService:
                 existing.updated_at = utcnow()
                 fixture = existing
             else:
+                just_finished = normalized.status == "finished"
                 fixture = Fixture(
                     id=fixture_id,
                     league_id=league.id,
@@ -231,6 +245,8 @@ class SyncService:
                 )
                 self.session.add(fixture)
             fixtures.append(fixture)
+            if just_finished:
+                newly_finished.append(fixture)
 
         await self.session.commit()
         for fixture in fixtures:
@@ -242,6 +258,20 @@ class SyncService:
                 "unknown team ref, run sync_teams first"
             )
         logger.info(f"Synced {len(fixtures)} fixtures for league {league.name}")
+
+        # Reactive, not scheduled - enrich a fixture with Understat's
+        # advanced stats right when it actually finishes, same trigger
+        # pattern as standings/player-stats sync elsewhere in this
+        # codebase. No-ops immediately if ENABLE_SOCCERDATA is off.
+        if settings.ENABLE_SOCCERDATA:
+            for fixture in newly_finished:
+                try:
+                    await self.sync_fixture_stats(fixture)
+                except Exception as e:  # noqa: BLE001 - one bad enrichment shouldn't break the sync
+                    logger.warning(
+                        f"Understat enrichment failed for fixture {fixture.id}: {e}"
+                    )
+
         return fixtures
 
     async def sync_standings(self, league: League, season_year: int) -> List[Standing]:
@@ -451,10 +481,10 @@ class SyncService:
         That avoids ending up with duplicate team rows from two unrelated
         ID namespaces for the same real-world team.
         """
-        if not settings.ENABLE_SOCCERDATA_FALLBACK:
+        if not settings.ENABLE_SOCCERDATA:
             raise RuntimeError(
                 "Soccerdata fallback is disabled - set "
-                "ENABLE_SOCCERDATA_FALLBACK=true and install the "
+                "ENABLE_SOCCERDATA=true and install the "
                 "'soccerdata' optional dependency group to use it"
             )
 
@@ -526,3 +556,173 @@ class SyncService:
             f"season {season_year} ({unmatched} unmatched)"
         )
         return {"updated": updated, "unmatched": unmatched}
+
+    async def sync_fixture_stats(self, fixture: Fixture) -> bool:
+        """Post-match enrichment for one already-finished fixture: advanced
+        stats (xG, xA, PPDA, shot map) from Understat - data api-sports.io
+        doesn't offer at any tier. Call this once a fixture's status flips
+        to finished, not on a recurring schedule; see
+        `UnderstatConnector`'s docstring for why this needs
+        ENABLE_SOCCERDATA=true and what that tradeoff is.
+
+        Returns False (no-op) if the flag is off, the competition isn't
+        covered, or Understat has no data for this fixture yet.
+        """
+        if not settings.ENABLE_SOCCERDATA:
+            return False
+
+        from app.connectors.understat import UnderstatConnector
+
+        league = await self.session.get(League, fixture.league_id)
+        home_team = await self.session.get(Team, fixture.home_team_id)
+        away_team = await self.session.get(Team, fixture.away_team_id)
+        if not league or not home_team or not away_team:
+            return False
+
+        connector = UnderstatConnector()
+        try:
+            data = await connector.fetch_match_stats(
+                league.external_ref,
+                fixture.season_year,
+                fixture.kickoff_at.date(),
+                home_team.name,
+                away_team.name,
+            )
+        except ValueError:
+            # Competition not covered by Understat - not an error, just
+            # nothing to enrich.
+            return False
+        except Exception as e:  # noqa: BLE001 - scraper, many ways to fail
+            logger.warning(f"Understat enrichment failed for fixture {fixture.id}: {e}")
+            return False
+
+        if not data:
+            return False
+
+        from app.connectors.soccerdata_sofascore import _team_ref
+
+        team_id_by_ref = {
+            _team_ref(home_team.name): home_team.id,
+            _team_ref(away_team.name): away_team.id,
+        }
+
+        for ps in data.player_stats:
+            team_id = team_id_by_ref.get(ps.team_external_ref)
+            if not team_id:
+                continue
+            existing = (
+                await self.session.exec(
+                    select(PlayerMatchStat).where(
+                        PlayerMatchStat.fixture_id == fixture.id,
+                        PlayerMatchStat.source == connector.source,
+                        PlayerMatchStat.external_ref == ps.external_ref,
+                    )
+                )
+            ).first()
+            values = dict(
+                team_id=team_id,
+                player_name=ps.player_name,
+                position=ps.position,
+                minutes=ps.minutes,
+                goals=ps.goals,
+                own_goals=ps.own_goals,
+                shots=ps.shots,
+                xg=ps.xg,
+                xg_chain=ps.xg_chain,
+                xg_buildup=ps.xg_buildup,
+                assists=ps.assists,
+                xa=ps.xa,
+                key_passes=ps.key_passes,
+                yellow_cards=ps.yellow_cards,
+                red_cards=ps.red_cards,
+            )
+            if existing:
+                for k, v in values.items():
+                    setattr(existing, k, v)
+                existing.updated_at = utcnow()
+                self.session.add(existing)
+            else:
+                self.session.add(
+                    PlayerMatchStat(
+                        fixture_id=fixture.id,
+                        source=connector.source,
+                        external_ref=ps.external_ref,
+                        **values,
+                    )
+                )
+
+        for ts in data.team_stats:
+            team_id = team_id_by_ref.get(ts.team_external_ref)
+            if not team_id:
+                continue
+            existing = (
+                await self.session.exec(
+                    select(TeamMatchStat).where(
+                        TeamMatchStat.fixture_id == fixture.id,
+                        TeamMatchStat.team_id == team_id,
+                    )
+                )
+            ).first()
+            values = dict(
+                points=ts.points,
+                expected_points=ts.expected_points,
+                goals=ts.goals,
+                xg=ts.xg,
+                np_xg=ts.np_xg,
+                np_xg_difference=ts.np_xg_difference,
+                ppda=ts.ppda,
+                deep_completions=ts.deep_completions,
+            )
+            if existing:
+                for k, v in values.items():
+                    setattr(existing, k, v)
+                existing.updated_at = utcnow()
+                self.session.add(existing)
+            else:
+                self.session.add(
+                    TeamMatchStat(
+                        fixture_id=fixture.id,
+                        team_id=team_id,
+                        source=connector.source,
+                        **values,
+                    )
+                )
+
+        for shot in data.shots:
+            team_id = team_id_by_ref.get(shot.team_external_ref)
+            if not team_id:
+                continue
+            existing = (
+                await self.session.exec(
+                    select(ShotEvent).where(
+                        ShotEvent.source == connector.source,
+                        ShotEvent.external_ref == shot.external_ref,
+                    )
+                )
+            ).first()
+            if existing:
+                continue  # a shot is an immutable historical event
+            self.session.add(
+                ShotEvent(
+                    fixture_id=fixture.id,
+                    team_id=team_id,
+                    source=connector.source,
+                    external_ref=shot.external_ref,
+                    player_name=shot.player_name,
+                    assist_player_name=shot.assist_player_name,
+                    minute=shot.minute,
+                    xg=shot.xg,
+                    location_x=shot.location_x,
+                    location_y=shot.location_y,
+                    body_part=shot.body_part,
+                    situation=shot.situation,
+                    result=shot.result,
+                )
+            )
+
+        await self.session.commit()
+        logger.info(
+            f"Synced Understat stats for fixture {fixture.id}: "
+            f"{len(data.player_stats)} players, {len(data.shots)} shots"
+        )
+        return True

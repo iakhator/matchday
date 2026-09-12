@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     FOOTBALL_DATA_ORG_BASE_URL: str = "https://api.football-data.org/v4"
 
     # Which leagues to track, using football-data.org competition codes.
-    # PL = Premier League, PD = La Liga (Primera Division)
-    TRACKED_COMPETITIONS: str = "PL,PD"
+    # PL = Premier League, PD = La Liga (Primera Division), BL1 = Bundesliga
+    TRACKED_COMPETITIONS: str = "PL,PD,BL1"
 
     # Off by default. Enables the Sofascore backfill fallback
     # (app/connectors/soccerdata_sofascore.py), a manually-triggered admin
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # TLS fingerprints to get past Sofascore's bot detection - a real
     # tradeoff, not just an extra data source. Requires the optional
     # `soccerdata` dependency group. See README before enabling.
-    ENABLE_SOCCERDATA_FALLBACK: bool = False
+    ENABLE_SOCCERDATA: bool = False
 
     @property
     def gateway_api_keys(self) -> List[str]:

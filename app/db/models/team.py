@@ -10,23 +10,25 @@ from app.utils.datetime_utils import utcnow
 class Team(SQLModel, table=True):
     """A real-world club, normalized across connectors.
 
-    `id` is the provider's own stable numeric identifier (e.g.
-    football-data.org's team id, 57 for Arsenal FC) - confirmed this never
-    changes across seasons or even across leagues (survives promotion/
-    relegation), so one row represents a club forever.
+    `id` is this gateway's own id, not the upstream provider's. Provider
+    ids live in `external_ids`, one row per source that knows this club,
+    because two providers do not agree on which number means Arsenal - and
+    a consumer should not have to care which source answered.
 
-    `league_id`/`season_year` are deliberately NOT part of this row's
-    identity - they're just this team's *current* league and season,
-    overwritten in place on every sync the same way League.
-    current_season_year already works. A club moving up/down a division
-    updates these two fields rather than creating a new Team row. Anything
-    that's genuinely season-specific (standings, fixtures, player stats)
-    already carries its own season_year and points at this stable id.
+    One club is one row forever. `league_id`/`season_year` are deliberately
+    NOT part of this row's identity - they are just its *current* league
+    and season, overwritten in place on each sync. A club moving up or down
+    a division updates those two fields rather than creating a new row.
+    Anything genuinely season-specific (standings, fixtures, player stats)
+    carries its own season_year and points at this stable id.
+
+    `source` records which connector last wrote this row. It is provenance,
+    not identity - the mapping in `external_ids` is what identifies.
     """
 
     __tablename__: str = "teams"
 
-    id: int = Field(primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(max_length=50, nullable=False)
     league_id: int = Field(foreign_key="leagues.id", nullable=False)
     season_year: int = Field(nullable=False)

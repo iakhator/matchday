@@ -10,21 +10,24 @@ from app.utils.datetime_utils import utcnow
 class League(SQLModel, table=True):
     """A competition/league, normalized across connectors.
 
-    `id` is the provider's own stable numeric identifier (e.g.
-    football-data.org's competition id, 2021 for the Premier League) - not
-    a synthetic key. Confirmed this id never changes across seasons, so one
-    row represents a competition forever; `current_season_year` is just
+    `id` is this gateway's own id. The upstream provider's numeric id lives
+    in `external_ids` alongside any other source that knows this
+    competition - see that model for why provider ids cannot serve as
+    primary keys here.
+
+    One row represents a competition forever; `current_season_year` is
     overwritten in place on each sync rather than the row being recreated.
 
-    `external_ref` is kept separately because it's the provider's *code*
-    (e.g. "PL"), not the numeric id - that's what every sync method uses to
-    call the upstream API, since football-data.org's URL paths take the
-    code, not the numeric id.
+    `external_ref` stays on the row itself, separately from the mapping,
+    because it is the provider's *code* ("PL") rather than its id, and it
+    is what the sync methods pass to the upstream API - football-data.org's
+    URL paths take the code. Keeping it here avoids a mapping lookup on
+    every sync just to build a URL.
     """
 
     __tablename__: str = "leagues"
 
-    id: int = Field(primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     source: str = Field(max_length=50, nullable=False)
     external_ref: str = Field(max_length=50, nullable=False, index=True)
 

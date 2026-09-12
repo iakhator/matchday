@@ -19,14 +19,16 @@ FIXTURE_STATUSES = (
 
 
 class Fixture(SQLModel, table=True):
-    """A single match. `id` is the provider's own stable numeric match id
-    (e.g. football-data.org's fixture id) - same reasoning as League/Team,
-    see those models' docstrings.
+    """A single match.
+
+    `id` is this gateway's own id; the provider's match id lives in
+    `external_ids` - same reasoning as League and Team, see those models'
+    docstrings.
     """
 
     __tablename__: str = "fixtures"
 
-    id: int = Field(primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     league_id: int = Field(foreign_key="leagues.id", nullable=False)
     season_year: int = Field(nullable=False)
     matchday: Optional[int] = Field(default=None, index=True)

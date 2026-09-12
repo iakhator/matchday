@@ -5,6 +5,7 @@ from app.api.v1.routes import (
     fixture_stats,
     fixtures,
     leagues,
+    lookup,
     player_stats,
     standings,
     teams,
@@ -17,4 +18,5 @@ api_router.include_router(fixtures.router)
 api_router.include_router(fixture_stats.router)
 api_router.include_router(standings.router)
 api_router.include_router(player_stats.router)
+api_router.include_router(lookup.router)
 api_router.include_router(admin.router)

@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 # create_all runs - importing app.db.models alone isn't enough since some
 # modules are only pulled in lazily elsewhere (e.g. connectors).
 from app.db.models import (  # noqa: F401
+    ExternalId,
     Fixture,
     League,
     PlayerMatchStat,

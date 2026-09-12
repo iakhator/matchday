@@ -118,6 +118,11 @@ season.
   Each job stamps a heartbeat on success; `GET /health/scheduler` reports
   unhealthy the moment any job's heartbeat goes stale (see
   `app/core/heartbeat.py`) - point an uptime monitor at it.
+- `app/services/id_mapper.py` - translates an upstream provider's ids into
+  this gateway's. Consumers build against ids this gateway owns, so an
+  upstream can be swapped without their data changing underneath them; the
+  `external_ids` table is where two providers' different ids for the same
+  club get reconciled.
 - `app/api/v1/` - the REST API your app calls:
   - `GET /leagues`, `GET /leagues/{id}`
   - `GET /leagues/{id}/teams`
@@ -127,6 +132,13 @@ season.
   - `GET /fixtures/{id}/player-stats`, `GET /fixtures/{id}/team-stats`,
     `GET /fixtures/{id}/shots` (Understat data, empty unless
     `ENABLE_SOCCERDATA=true`)
+  - `GET /lookup/{entity_type}?source=...&external_id=...` - translate
+    another provider's ids into this gateway's. Takes several ids at once
+    (comma-separated, up to 500) and returns `resolved` plus an explicit
+    `unresolved` list, so a consumer can see exactly which of its entities
+    are unrecognised rather than having them silently missing.
+  - `GET /lookup/{entity_type}/{internal_id}/aliases` - the reverse: every
+    provider id known for one gateway row.
   - `POST /admin/sync`, `POST /admin/backfill-results`,
     `POST /admin/enrich-fixture/{id}` (manual triggers)
 

@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.db.models import (
+    EntityType,
     Fixture,
     League,
     PlayerMatchStat,
@@ -19,6 +20,7 @@ from app.db.models import (
     Team,
     TeamMatchStat,
 )
+from app.services.id_mapper import IdMapper
 from app.utils.datetime_utils import utcnow
 
 
@@ -29,16 +31,20 @@ class SyncService:
     next one on failure, so a single upstream outage doesn't take the whole
     gateway down.
 
-    League/Team/Fixture ids are the provider's own stable numeric ids
-    (confirmed these never change across seasons - see each model's
-    docstring), so upserts here resolve rows by that id directly instead of
-    a league+season-scoped lookup. Standing/PlayerStat keep synthetic UUID
-    ids since a "this team's standing this season" row has no natural id of
-    its own from the provider.
+    League/Team/Fixture ids belong to this gateway, not to the upstream
+    provider, so every upsert here first translates the provider's ref into
+    a gateway id via `IdMapper` - creating the mapping the first time a ref
+    is seen. Standing/PlayerStat keep synthetic ids since a "this team's
+    standing this season" row has no natural id of its own from the
+    provider.
+
+    A ref with no mapping means the entity has not been synced yet. Those
+    rows are skipped rather than written with a guessed id.
     """
 
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.ids = IdMapper(session)
 
     async def _first_success(self, label: str, attempts: list):
         last_error: Optional[Exception] = None
@@ -59,7 +65,10 @@ class SyncService:
             [(c, c.fetch_league(competition_code)) for c in connectors],
         )
 
-        existing = await self.session.get(League, normalized.external_id)
+        internal_id = await self.ids.resolve(
+            EntityType.LEAGUE, connector.source, normalized.external_id
+        )
+        existing = await self.session.get(League, internal_id) if internal_id else None
 
         if existing:
             existing.source = connector.source
@@ -72,7 +81,6 @@ class SyncService:
             league = existing
         else:
             league = League(
-                id=normalized.external_id,
                 source=connector.source,
                 external_ref=normalized.external_ref,
                 name=normalized.name,
@@ -81,6 +89,13 @@ class SyncService:
                 current_season_year=normalized.current_season_year,
             )
             self.session.add(league)
+            # Flushed, not committed: the id is assigned by the sequence, and
+            # the mapping cannot be written until it exists. Both land in the
+            # same transaction, so a row can never end up without its mapping.
+            await self.session.flush()
+            await self.ids.link(
+                EntityType.LEAGUE, connector.source, normalized.external_id, league.id
+            )
 
         await self.session.commit()
         await self.session.refresh(league)
@@ -101,22 +116,26 @@ class SyncService:
             or [(c, c.fetch_teams(league.external_ref, season_year)) for c in connectors],
         )
 
-        candidate_ids = [int(t.external_ref) for t in normalized_teams]
+        known = await self.ids.resolve_many(
+            EntityType.TEAM,
+            connector.source,
+            [t.external_ref for t in normalized_teams],
+        )
         existing_rows = (
             (
                 await self.session.exec(
-                    select(Team).where(Team.id.in_(candidate_ids))
+                    select(Team).where(Team.id.in_(list(known.values())))
                 )
             ).all()
-            if candidate_ids
+            if known
             else []
         )
         existing_by_id = {t.id: t for t in existing_rows}
 
         teams = []
         for normalized in normalized_teams:
-            team_id = int(normalized.external_ref)
-            existing = existing_by_id.get(team_id)
+            team_id = known.get(str(normalized.external_ref))
+            existing = existing_by_id.get(team_id) if team_id else None
             if existing:
                 existing.name = normalized.name
                 existing.short_name = normalized.short_name
@@ -132,7 +151,6 @@ class SyncService:
                 team = existing
             else:
                 team = Team(
-                    id=team_id,
                     source=connector.source,
                     league_id=league.id,
                     season_year=season_year,
@@ -143,6 +161,13 @@ class SyncService:
                     venue=normalized.venue,
                 )
                 self.session.add(team)
+                await self.session.flush()
+                await self.ids.link(
+                    EntityType.TEAM,
+                    connector.source,
+                    normalized.external_ref,
+                    team.id,
+                )
             teams.append(team)
 
         await self.session.commit()
@@ -182,19 +207,26 @@ class SyncService:
             ],
         )
 
-        team_candidates = {
-            int(f.home_team_external_ref) for f in normalized_fixtures
-        } | {int(f.away_team_external_ref) for f in normalized_fixtures}
-        valid_team_ids = await self._existing_team_ids(list(team_candidates))
+        team_refs = {f.home_team_external_ref for f in normalized_fixtures} | {
+            f.away_team_external_ref for f in normalized_fixtures
+        }
+        team_ids_by_ref = await self.ids.resolve_many(
+            EntityType.TEAM, connector.source, list(team_refs)
+        )
+        valid_team_ids = await self._existing_team_ids(list(team_ids_by_ref.values()))
 
-        fixture_ids = [int(f.external_ref) for f in normalized_fixtures]
+        known_fixtures = await self.ids.resolve_many(
+            EntityType.FIXTURE,
+            connector.source,
+            [f.external_ref for f in normalized_fixtures],
+        )
         existing_rows = (
             (
                 await self.session.exec(
-                    select(Fixture).where(Fixture.id.in_(fixture_ids))
+                    select(Fixture).where(Fixture.id.in_(list(known_fixtures.values())))
                 )
             ).all()
-            if fixture_ids
+            if known_fixtures
             else []
         )
         existing_by_id = {f.id: f for f in existing_rows}
@@ -203,17 +235,21 @@ class SyncService:
         newly_finished = []
         skipped = 0
         for normalized in normalized_fixtures:
-            home_team_id = int(normalized.home_team_external_ref)
-            away_team_id = int(normalized.away_team_external_ref)
-            if home_team_id not in valid_team_ids or away_team_id not in valid_team_ids:
+            home_team_id = team_ids_by_ref.get(str(normalized.home_team_external_ref))
+            away_team_id = team_ids_by_ref.get(str(normalized.away_team_external_ref))
+            if (
+                home_team_id not in valid_team_ids
+                or away_team_id not in valid_team_ids
+            ):
                 # Team hasn't been synced yet (e.g. promoted/relegated club
-                # not yet in this season's roster) - skip until sync_teams
-                # catches up rather than writing a broken fixture row.
+                # not yet in this season's roster), or has no mapping at all -
+                # skip until sync_teams catches up rather than writing a
+                # broken fixture row.
                 skipped += 1
                 continue
 
-            fixture_id = int(normalized.external_ref)
-            existing = existing_by_id.get(fixture_id)
+            fixture_id = known_fixtures.get(str(normalized.external_ref))
+            existing = existing_by_id.get(fixture_id) if fixture_id else None
             if existing:
                 just_finished = (
                     existing.status != "finished" and normalized.status == "finished"
@@ -230,7 +266,6 @@ class SyncService:
             else:
                 just_finished = normalized.status == "finished"
                 fixture = Fixture(
-                    id=fixture_id,
                     league_id=league.id,
                     season_year=season_year,
                     matchday=normalized.matchday,
@@ -244,6 +279,13 @@ class SyncService:
                     away_score=normalized.away_score,
                 )
                 self.session.add(fixture)
+                await self.session.flush()
+                await self.ids.link(
+                    EntityType.FIXTURE,
+                    connector.source,
+                    normalized.external_ref,
+                    fixture.id,
+                )
             fixtures.append(fixture)
             if just_finished:
                 newly_finished.append(fixture)
@@ -289,9 +331,12 @@ class SyncService:
             ],
         )
 
-        valid_team_ids = await self._existing_team_ids(
-            [int(s.team_external_ref) for s in normalized_standings]
+        team_ids_by_ref = await self.ids.resolve_many(
+            EntityType.TEAM,
+            connector.source,
+            [s.team_external_ref for s in normalized_standings],
         )
+        valid_team_ids = await self._existing_team_ids(list(team_ids_by_ref.values()))
 
         existing_rows = (
             await self.session.exec(
@@ -305,7 +350,7 @@ class SyncService:
         standings = []
         skipped = 0
         for normalized in normalized_standings:
-            team_id = int(normalized.team_external_ref)
+            team_id = team_ids_by_ref.get(str(normalized.team_external_ref))
             if team_id not in valid_team_ids:
                 # Same reasoning as sync_fixtures - a team not yet in this
                 # season's roster (sync_teams hasn't caught up). Skip rather
@@ -374,9 +419,12 @@ class SyncService:
             ],
         )
 
-        valid_team_ids = await self._existing_team_ids(
-            [int(s.team_external_ref) for s in normalized_stats]
+        team_ids_by_ref = await self.ids.resolve_many(
+            EntityType.TEAM,
+            connector.source,
+            [s.team_external_ref for s in normalized_stats],
         )
+        valid_team_ids = await self._existing_team_ids(list(team_ids_by_ref.values()))
 
         existing_rows = (
             (
@@ -396,7 +444,7 @@ class SyncService:
         stats = []
         skipped = 0
         for normalized in normalized_stats:
-            team_id = int(normalized.team_external_ref)
+            team_id = team_ids_by_ref.get(str(normalized.team_external_ref))
             if team_id not in valid_team_ids:
                 skipped += 1
                 continue

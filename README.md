@@ -20,6 +20,7 @@ third-party vendor.
 - [What it does (and doesn't) solve](#what-it-does-and-doesnt-solve)
 - [Data licensing and attribution](#data-licensing-and-attribution)
 - [Architecture](#architecture)
+- [Authentication and rate limits](#authentication-and-rate-limits)
 - [Adding a connector](#adding-a-connector)
 - [Mapping ids from another provider](#mapping-ids-from-another-provider)
 - [Local development](#local-development)
@@ -150,8 +151,66 @@ season.
   - `POST /admin/sync`, `POST /admin/backfill-results`,
     `POST /admin/enrich-fixture/{id}` (manual triggers)
 
-  All gated by a simple `X-Gateway-Key` header (disabled by default in
-  dev) - see `app/core/auth.py`.
+  All gated by an `X-Gateway-Key` header - see "Authentication and rate
+  limits" below. `GET /health` and `GET /health/scheduler` are deliberately
+  ungated so an uptime monitor needs no credentials.
+
+## Authentication and rate limits
+
+Keys are configured as `name:secret` or `name:secret:requests_per_minute`:
+
+```bash
+GATEWAY_API_KEYS="predify:s3cret:120,analytics:other-secret:30"
+```
+
+Names matter once more than one app calls the gateway: without them you
+cannot tell consumers apart in the logs, revoke one without breaking the
+others, or see which one is responsible for a spike. A bare secret with no
+name still works, so configurations written before this keep running - it
+just shows as `unnamed` and gets `DEFAULT_RATE_LIMIT_PER_MINUTE`.
+
+**The gateway fails closed.** With no keys configured and no explicit
+opt-out it refuses every request with a `503` naming the setting that
+fixes it. The previous behaviour was to disable auth entirely when the key
+list was empty, which meant a deployment that simply forgot to set it
+served everything to anyone who found it, quietly. For local development,
+opt out on purpose:
+
+```bash
+GATEWAY_ALLOW_ANONYMOUS=true
+```
+
+`docker-compose.dev.yml` already sets this, so local development is
+unaffected.
+
+### The 429 contract
+
+Over the limit returns `429` with a `Retry-After` header in seconds, and a
+body naming the consumer and its limit:
+
+```json
+{"detail": "Rate limit exceeded for 'predify' (3 requests/minute)"}
+```
+
+The window slides rather than resetting on a boundary, so `Retry-After` is
+the time until the oldest request in the window expires - often well under
+a minute - rather than a flat 60. Waiting exactly that long is enough; a
+client that honours the header will not be refused twice for the same
+reason.
+
+Limits are counted **per key name**, so rotating a consumer's secret does
+not hand it a fresh allowance mid-minute.
+
+Two honest limitations, both from keeping this in-process rather than
+adding Redis for a single-container deployment:
+
+- limits reset when the process restarts
+- limits are per worker, so N uvicorn workers allow N times the rate
+
+Neither affects what this is for: stopping one misbehaving consumer from
+starving the others and the sync jobs, which share the process. A
+multi-replica deployment wanting exact global limits needs shared storage,
+and that is not what this is today.
 
 ## Adding a connector
 

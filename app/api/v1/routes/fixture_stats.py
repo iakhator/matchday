@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
 from app.db.database import get_session
 from app.db.models import Fixture, PlayerMatchStat, ShotEvent, TeamMatchStat
@@ -27,7 +28,7 @@ async def _require_fixture(fixture_id: int, session: AsyncSession) -> Fixture:
 async def list_player_match_stats(
     fixture_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Advanced per-player match stats (xG, xA, xG-chain/buildup) from
     Understat. Empty if ENABLE_SOCCERDATA is off or Understat has no data
@@ -48,7 +49,7 @@ async def list_player_match_stats(
 async def list_team_match_stats(
     fixture_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Advanced team match stats (non-penalty xG, PPDA, deep completions,
     expected points) from Understat."""
@@ -66,7 +67,7 @@ async def list_team_match_stats(
 async def list_shot_events(
     fixture_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Shot-map data (location, xG, body part, situation, result) from
     Understat."""
@@ -86,7 +87,7 @@ async def list_shot_events(
 async def list_goals(
     fixture_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     """Goal events for a fixture: scorer, assister and minute.
 

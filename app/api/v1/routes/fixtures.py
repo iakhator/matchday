@@ -5,6 +5,7 @@ from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
 from app.db.database import get_session
 from app.db.models import Fixture, League, Team
@@ -26,7 +27,7 @@ async def list_fixtures(
         description="scheduled | live | finished | postponed | suspended | cancelled",
     ),
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     league = await session.get(League, league_id)
     if not league:
@@ -81,7 +82,7 @@ async def list_fixtures(
 async def get_fixture(
     fixture_id: int,
     session: AsyncSession = Depends(get_session),
-    _: str = Depends(require_api_key),
+    _: ApiKey = Depends(require_api_key),
 ):
     HomeTeam = aliased(Team, name="home_team")
     AwayTeam = aliased(Team, name="away_team")

@@ -1,14 +1,19 @@
+from datetime import timedelta
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.scheduler.jobs import (
+    capture_odds_job,
+    map_api_football_fixtures_job,
     sync_fixtures_job,
     sync_leagues_and_teams_job,
     sync_live_fixtures_job,
     sync_standings_and_players_job,
 )
+from app.utils.datetime_utils import utcnow
 
 scheduler = AsyncIOScheduler()
 
@@ -53,6 +58,33 @@ def start_scheduler() -> None:
         "standings/players every "
         f"{SchedulerConfig.STANDINGS_AND_PLAYERS_SYNC_INTERVAL_MINUTES}m "
         f"for {', '.join(SchedulerConfig.TRACKED_COMPETITIONS)}"
+    )
+
+
+    # start_date delays the first run. Without it an IntervalTrigger fires
+    # the instant the scheduler starts, which is before the container's
+    # DNS is reliably up - both of these failed on startup with "No address
+    # associated with hostname" and then sat idle until their next
+    # interval, a full day away for the mapping job.
+    first_run = utcnow() + timedelta(seconds=SchedulerConfig.JOB_STARTUP_DELAY_SECONDS)
+
+    scheduler.add_job(
+        map_api_football_fixtures_job,
+        trigger=IntervalTrigger(
+            minutes=SchedulerConfig.FIXTURE_MAPPING_INTERVAL_MINUTES,
+            start_date=first_run,
+        ),
+        id="map_api_football_fixtures",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        capture_odds_job,
+        trigger=IntervalTrigger(
+            minutes=SchedulerConfig.ODDS_CAPTURE_INTERVAL_MINUTES,
+            start_date=first_run,
+        ),
+        id="capture_odds",
+        replace_existing=True,
     )
 
 

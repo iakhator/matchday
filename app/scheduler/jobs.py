@@ -3,6 +3,7 @@ from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.db.database import async_session
 from app.services.sync_service import SyncService
+from app.utils.datetime_utils import utcnow
 
 
 async def sync_leagues_and_teams_job() -> None:
@@ -98,3 +99,83 @@ async def sync_live_fixtures_job() -> None:
         # not just when an upstream sync actually happened.
         if checked_ok:
             await record_heartbeat(session, "sync_live_fixtures")
+
+
+async def map_api_football_fixtures_job() -> None:
+    """Daily: match api-football's fixture ids onto the ones we hold.
+
+    Two dates, today and tomorrow. Mapping has to happen *before* anything
+    needs it - odds are wanted a day ahead of kickoff, and a fixture mapped
+    after its match has started can never have odds at all.
+
+    Two requests out of a 100/day budget. One call covers every competition
+    api-football knows about, so this does not grow with our coverage.
+    """
+    from datetime import timedelta
+
+    from app.connectors.api_football import ApiFootballConnector, DailyBudgetExceeded
+    from app.services.fixture_mapper import FixtureMapper
+
+    mapped, succeeded = 0, 0
+    async with async_session() as session:
+        try:
+            connector = ApiFootballConnector()
+        except RuntimeError as exc:
+            # No key configured. A gateway running on football-data.org
+            # alone is a valid deployment, so this is a note, not an error.
+            logger.info(f"Skipping api-football mapping: {exc}")
+            return
+
+        mapper = FixtureMapper(session, connector)
+        today = utcnow().date()
+        for day in (today, today + timedelta(days=1)):
+            try:
+                mapped += len(await mapper.map_date(day))
+                succeeded += 1
+            except DailyBudgetExceeded as exc:
+                logger.error(f"Fixture mapping stopped: {exc}")
+                break
+            except Exception:
+                logger.exception(f"Fixture mapping failed for {day}")
+
+        # Heartbeat only if a date was actually processed. Zero new
+        # mappings is a success - a quiet Tuesday maps nothing - but zero
+        # *successful calls* is a failure, and stamping regardless would
+        # report healthy while the job did nothing at all. Same rule the
+        # other jobs here follow, and it was worth following: an early
+        # version stamped unconditionally and looked fine through a run
+        # where every request failed DNS.
+        if succeeded:
+            await record_heartbeat(session, "map_api_football_fixtures")
+    if mapped:
+        logger.info(f"Mapped {mapped} api-football fixtures")
+
+
+async def capture_odds_job() -> None:
+    """Hourly: capture pre-match odds for fixtures kicking off soon.
+
+    The only job here with a deadline. Odds cannot be fetched after
+    kickoff, so a window missed is a hole nothing later can fill - hourly
+    gives roughly 24 attempts inside the 24-hour capture window, so a few
+    failed runs are survivable.
+    """
+    from app.connectors.api_football import ApiFootballConnector
+    from app.services.odds_service import OddsService
+
+    async with async_session() as session:
+        try:
+            connector = ApiFootballConnector()
+        except RuntimeError as exc:
+            logger.info(f"Skipping odds capture: {exc}")
+            return
+
+        try:
+            await OddsService(session, connector).capture_upcoming()
+        except Exception:
+            # Deliberately swallowed after logging: a failure here must not
+            # take down the scheduler and with it the fixture sync, which
+            # is the more important of the two.
+            logger.exception("Odds capture failed")
+            return
+
+        await record_heartbeat(session, "capture_odds")

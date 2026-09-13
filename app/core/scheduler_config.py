@@ -32,6 +32,23 @@ class SchedulerConfig:
     # budget with headroom for the slower jobs and manual admin syncs.
     LIVE_FIXTURE_SYNC_INTERVAL_SECONDS = 60
 
+    # How long after startup the api-football jobs first run. An
+    # IntervalTrigger otherwise fires immediately, before container DNS is
+    # reliably up - and a failed first run then waits a full interval,
+    # which for the daily mapping job means a day.
+    JOB_STARTUP_DELAY_SECONDS = 45
+
+    # api-football fixture mapping (minutes). Daily is enough - it maps
+    # today and tomorrow, and fixtures for tomorrow do not appear at the
+    # last minute. Two requests of a 100/day budget.
+    FIXTURE_MAPPING_INTERVAL_MINUTES = 60 * 24
+
+    # Odds capture (minutes). The only job with a deadline: odds cannot be
+    # fetched once a match kicks off, so a missed window is permanent.
+    # Hourly gives ~24 attempts inside the 24-hour capture window, so a few
+    # failed runs are survivable.
+    ODDS_CAPTURE_INTERVAL_MINUTES = 60
+
     # How far back from "now" a fixture's kickoff still counts as "in its
     # live window" for the fast-cadence job - covers 90 minutes + stoppage
     # + halftime + a buffer for delayed kickoffs.

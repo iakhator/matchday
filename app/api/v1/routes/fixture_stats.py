@@ -130,17 +130,23 @@ async def list_goals(
         if shot.result not in ("Goal", "Own Goal"):
             continue
 
-        # Upstream occasionally records one goal as two shots with
-        # different ids - seen on 1 of 87 enriched fixtures, where every
-        # goal was duplicated and the derived score came out at exactly
-        # double the real one (4-6 for a match that finished 2-3). The
-        # rows are genuinely distinct by id, so the upsert cannot catch it.
+        # Defence in depth. The sync path now deduplicates on the same
+        # key, so this should never fire on freshly synced data - but a
+        # doubled goal produces a visibly wrong scoreline, and a second
+        # cheap check is worth more than the line it costs.
         #
-        # The same player scoring twice in the same minute with the same
-        # outcome is not a thing that happens; a double-recorded event is.
-        # Collapsing on that is the safer reading, and serving a wrong
-        # scoreline is the worse failure.
-        signature = (shot.minute, shot.player_name, shot.result)
+        # xG and coordinates are part of the key deliberately. On
+        # (minute, player, result) alone this would also collapse
+        # rebounds; identical xG *and* identical coordinates is one event
+        # recorded twice.
+        signature = (
+            shot.minute,
+            shot.player_name,
+            shot.result,
+            shot.xg,
+            shot.location_x,
+            shot.location_y,
+        )
         if signature in seen:
             continue
         seen.add(signature)

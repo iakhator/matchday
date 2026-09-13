@@ -745,11 +745,31 @@ class SyncService:
             team_id = team_id_by_ref.get(shot.team_external_ref)
             if not team_id:
                 continue
+            # Deduplicated on what the shot *is*, not on the provider's id
+            # for it. Upstream sometimes emits one event twice under two
+            # ids - seen across 23 shots in a fixture where every goal was
+            # doubled, making the derived score 4-6 for a match that
+            # finished 2-3. Keying on external_ref alone cannot catch that,
+            # because the ids genuinely differ.
+            #
+            # xG and location are part of the key on purpose. Without them
+            # this would also collapse rebounds: two blocked shots by the
+            # same player in the same minute is a real sequence, and 13 of
+            # the 14 fixtures that look duplicated on
+            # (player, minute, result) alone are exactly that. Identical
+            # xG to four decimals *and* identical coordinates is one event
+            # recorded twice; anything else is two shots.
             existing = (
                 await self.session.exec(
                     select(ShotEvent).where(
-                        ShotEvent.source == connector.source,
-                        ShotEvent.external_ref == shot.external_ref,
+                        ShotEvent.fixture_id == fixture.id,
+                        ShotEvent.team_id == team_id,
+                        ShotEvent.player_name == shot.player_name,
+                        ShotEvent.minute == shot.minute,
+                        ShotEvent.result == shot.result,
+                        ShotEvent.xg == shot.xg,
+                        ShotEvent.location_x == shot.location_x,
+                        ShotEvent.location_y == shot.location_y,
                     )
                 )
             ).first()

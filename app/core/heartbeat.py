@@ -77,20 +77,49 @@ async def seed_heartbeats_on_startup(session: AsyncSession) -> None:
             logger.exception(f"Failed to seed heartbeat for '{job_id}'")
 
 
-async def get_stale_jobs(session: AsyncSession) -> List[str]:
-    """Job ids whose heartbeat has expired or never fired - what's
-    actually wrong, if anything."""
+async def get_job_health(session: AsyncSession) -> List[Dict]:
+    """Per-job heartbeat state.
+
+    Returns detail rather than just names so an alert can say *how* stale a
+    job is and what it was measured against. "sync_fixtures is stale" sends
+    someone to a terminal; "sync_fixtures last ran 649 minutes ago, against
+    a 30 minute threshold" tells them it is not a blip before they get
+    there.
+    """
     rows = (await session.exec(select(SchedulerHeartbeat))).all()
     last_run_by_job = {row.job_id: row.last_run_at for row in rows}
 
     now = utcnow()
-    stale = []
+    jobs = []
     for job_id, grace_seconds in JOB_GRACE_SECONDS.items():
         last_run_at = last_run_by_job.get(job_id)
         if last_run_at is None:
-            stale.append(job_id)
+            jobs.append(
+                {
+                    "job_id": job_id,
+                    "last_run_at": None,
+                    "age_seconds": None,
+                    "threshold_seconds": grace_seconds,
+                    "stale": True,
+                }
+            )
             continue
-        age_seconds = (now - ensure_utc(last_run_at)).total_seconds()
-        if age_seconds > grace_seconds:
-            stale.append(job_id)
-    return stale
+
+        last_run_at = ensure_utc(last_run_at)
+        age_seconds = (now - last_run_at).total_seconds()
+        jobs.append(
+            {
+                "job_id": job_id,
+                "last_run_at": last_run_at.isoformat(),
+                "age_seconds": round(age_seconds),
+                "threshold_seconds": grace_seconds,
+                "stale": age_seconds > grace_seconds,
+            }
+        )
+    return jobs
+
+
+async def get_stale_jobs(session: AsyncSession) -> List[str]:
+    """Job ids whose heartbeat has expired or never fired - what's
+    actually wrong, if anything."""
+    return [job["job_id"] for job in await get_job_health(session) if job["stale"]]

@@ -20,6 +20,7 @@ third-party vendor.
 - [What it does (and doesn't) solve](#what-it-does-and-doesnt-solve)
 - [Data licensing and attribution](#data-licensing-and-attribution)
 - [Architecture](#architecture)
+- [How fresh is the data?](#how-fresh-is-the-data)
 - [Authentication and rate limits](#authentication-and-rate-limits)
 - [Adding a connector](#adding-a-connector)
 - [Mapping ids from another provider](#mapping-ids-from-another-provider)
@@ -54,7 +55,7 @@ already exist but serve narrower purposes - see "Backfill fallback" below
 | --- | --- |
 | Leagues, teams | Yes - synced daily |
 | Fixtures/schedule (including postponements/reschedules) | Yes - synced continuously |
-| Scores/results | Yes - synced continuously |
+| Scores/results | Yes - synced continuously, with a ~7 minute upstream delay on the free tier ([measured](#how-fresh-is-the-data)) |
 | Standings, season scorers (goals/assists/appearances) | Yes - synced on their own cadence, see below |
 | Advanced match stats (xG, xA, xG-chain/buildup, PPDA, shot maps) | Optional - via Understat, reactively enriched right when a fixture finishes. Off by default; see "Backfill fallback" below for the tradeoff |
 | Goal events (scorer, assist, minute) | Yes, but derived from Understat shot data - football-data.org exposes none at this tier. Same `ENABLE_SOCCERDATA` caveat as the rest of the Understat data |
@@ -211,6 +212,54 @@ Neither affects what this is for: stopping one misbehaving consumer from
 starving the others and the sync jobs, which share the process. A
 multi-replica deployment wanting exact global limits needs shared storage,
 and that is not what this is today.
+
+## How fresh is the data?
+
+Measured, not asserted. `scripts/latency_probe.py` watches this gateway's
+own API across a matchday and records when each fixture's status and score
+actually change, relative to that fixture's kickoff. Re-runnable, so the
+number below can be checked rather than trusted.
+
+Measured on 12 September 2026, free tier, Premier League + La Liga +
+Bundesliga:
+
+| | |
+| --- | --- |
+| Kickoff -> status becomes `live` | **7-10 minutes** (10 fixtures) |
+| Goal scored -> new score visible | **7-8 minutes** (5 fixtures) |
+
+The two agree, which is the useful part: both point at a roughly
+seven-minute delay between something happening and this gateway being able
+to see it.
+
+**That delay is upstream, not here.** The live-score job polls every 60
+seconds, so the gateway can add at most about a minute of its own.
+football-data.org's free tier advertises *delayed scores*, and this is what
+that means in practice.
+
+Worth knowing before building on it: a seven-minute lag is fine for
+standings, schedules and post-match results. It is not fine for anything
+that needs to react as a match unfolds - live odds, in-play notifications,
+a second-screen experience. Those need a paid tier or a different upstream,
+and no amount of polling here will fix it.
+
+Sample sizes are small and from a single matchday, so treat the figures as
+an order of magnitude rather than an SLA. The goal-latency correlation
+matches score changes to goal minutes heuristically; one further
+observation did not correlate cleanly and was excluded rather than
+averaged in.
+
+```bash
+python scripts/latency_probe.py --until 22:00   # capture a matchday
+python scripts/latency_probe.py --report        # summarise the log
+```
+
+The probe asks the gateway which competitions exist rather than holding a
+list of its own. An earlier version hardcoded the upstream provider's
+competition ids; when the gateway moved to ids of its own, every request
+404'd and the probe carried on for seven hours recording nothing. It now
+discovers competitions at startup and aborts if fetches keep failing,
+because a log file full of errors looks like data until you read it.
 
 ## Adding a connector
 

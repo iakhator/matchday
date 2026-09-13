@@ -49,8 +49,15 @@ from pathlib import Path
 GATEWAY = os.environ.get("GATEWAY_URL", "http://localhost:8010")
 OUT = Path(os.environ.get("LATENCY_OUT", "/tmp/matchday_latency.jsonl"))
 
-# football-data.org competition ids. Anything the gateway syncs can go here.
-COMPETITIONS = [2021, 2014, 2002]
+# Discovered from the gateway rather than hardcoded.
+#
+# This used to hold football-data.org's own competition ids (2021, 2014,
+# 2002). When the gateway moved to ids of its own, every request here
+# started returning 404 - and the probe carried on regardless, logging
+# 2,463 errors over seven hours and recording nothing. It broke exactly
+# the way any consumer holding a provider's ids would have, which is the
+# argument for the gateway owning its ids in the first place.
+COMPETITIONS: list[int] = []
 
 # Roughly 90 minutes plus half time and stoppage. Only used to label how
 # far past a plausible full time a result arrived - never to decide that a
@@ -81,6 +88,20 @@ def fetch(competition: int) -> list[dict]:
     if isinstance(payload, list):
         return payload
     return payload.get("items", payload.get("data", []))
+
+
+def discover_competitions() -> list[int]:
+    """Ask the gateway which competitions it has."""
+    req = urllib.request.Request(
+        f"{GATEWAY}/api/v1/leagues", headers={"Accept": "application/json"}
+    )
+    key = os.environ.get("GATEWAY_API_KEY")
+    if key:
+        req.add_header("X-Gateway-Key", key)
+    with urllib.request.urlopen(req, timeout=30) as response:
+        payload = json.load(response)
+    rows = payload if isinstance(payload, list) else payload.get("items", [])
+    return [int(row["id"]) for row in rows]
 
 
 def live_window(fixture: dict, at: datetime) -> bool:
@@ -114,24 +135,38 @@ def record(event: dict) -> None:
 
 
 def watch(until: datetime, interval: int) -> int:
-    log(f"watching {len(COMPETITIONS)} competitions every {interval}s")
+    competitions = COMPETITIONS or discover_competitions()
+    if not competitions:
+        log("gateway reports no competitions - nothing to watch")
+        return 1
+
+    log(f"watching {len(competitions)} competitions every {interval}s")
     log(f"until {until:%H:%M} UTC, writing to {OUT}")
 
     seen: dict[int, dict] = {}
     ticks = 0
     transitions = 0
+    consecutive_errors = 0
+
+    # Roughly ten minutes of every fetch failing at the default interval.
+    max_consecutive_errors = max(20, int(600 / max(interval, 1)))
 
     while now() < until:
         ticks += 1
         at = now()
         tracked = 0
 
-        for competition in COMPETITIONS:
+        for competition in competitions:
             try:
                 fixtures = fetch(competition)
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
                 # A blip must not end a run that can only be done on a
-                # matchday - note it and carry on.
+                # matchday - note it and carry on. But a *sustained* failure
+                # is not a blip, and a probe that keeps politely retrying a
+                # dead endpoint for hours produces a log file that looks
+                # like data and contains none. Give up once it is clearly
+                # not transient.
+                consecutive_errors += 1
                 log(f"competition {competition} fetch failed: {exc}")
                 record(
                     {
@@ -141,7 +176,16 @@ def watch(until: datetime, interval: int) -> int:
                         "detail": str(exc)[:200],
                     }
                 )
+                if consecutive_errors >= max_consecutive_errors:
+                    log(
+                        f"aborting: {consecutive_errors} consecutive fetch "
+                        f"failures. Has the gateway moved, or its ids changed?"
+                    )
+                    report()
+                    return 1
                 continue
+
+            consecutive_errors = 0
 
             for fixture in fixtures:
                 if not fixture.get("kickoff_at") or not live_window(fixture, at):

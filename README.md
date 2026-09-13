@@ -25,6 +25,7 @@ third-party vendor.
 - [Adding a connector](#adding-a-connector)
 - [Mapping ids from another provider](#mapping-ids-from-another-provider)
 - [Local development](#local-development)
+- [Deploying](#deploying)
 - [Backfill fallback](#backfill-fallback-optional-off-by-default)
 - [Consuming this from another app](#consuming-this-from-another-app)
 - [Status](#status)
@@ -363,6 +364,67 @@ normalization (status mapping, standings table selection, field
 fallbacks), sync upsert/idempotency and unknown-team-ref skipping, the
 connector fallback chain, the Sofascore team-name slug matching, API-key
 auth, and the scheduler heartbeat logic itself.
+
+## Deploying
+
+Build the production image - `Dockerfile`, not `Dockerfile.dev`, which
+runs with `--reload`, installs test dependencies and runs as root:
+
+```bash
+docker build -t matchday-gateway:latest .
+```
+
+It is a two-stage build: no build toolchain, no dev dependencies, runs as
+an unprivileged user that does not own `/app`.
+
+### Migrations belong to the release phase
+
+The image takes a command:
+
+```bash
+docker run ... matchday-gateway:latest migrate   # apply migrations, exit
+docker run ... matchday-gateway:latest serve     # run the API (default)
+```
+
+`serve` deliberately does **not** migrate on start. With more than one
+replica, every container racing to migrate the same database makes "a
+container restarted" and "the schema changed" the same event, which is not
+something to discover mid-incident. And a failed migration inside the app
+process looks like a crash loop, so the platform keeps restarting it
+instead of stopping the deploy.
+
+So run `migrate` as a release/pre-deploy step, before the new `serve`
+containers start.
+
+**Do not apply migrations by hand.** A database migrated ahead of the code
+that is deployed will fail the next release phase on a revision it cannot
+find, and you get to work that out while a deploy is half-done. Let the
+pipeline own it.
+
+### What must be set
+
+| | |
+| --- | --- |
+| `DATABASE_URL` | Postgres, `postgresql+asyncpg://...` |
+| `GATEWAY_API_KEYS` | at least one, as `name:secret` - see [Authentication](#authentication-and-rate-limits) |
+| `FOOTBALL_DATA_ORG_API_KEY` | your own key |
+| `GATEWAY_ALLOW_ANONYMOUS` | leave unset. `true` disables auth entirely |
+
+Secrets come from the environment. `.env` files are excluded from the
+image by `.dockerignore`, so a stray local config cannot be baked in.
+
+Optional: `PORT` (default 8010) and `WEB_CONCURRENCY` (default 1). Raise
+workers only having read the rate-limit note above - limits are counted
+per process, so N workers allow N times the configured rate.
+
+### Health
+
+`GET /health` is liveness, and is what the image's own `HEALTHCHECK` uses.
+
+`GET /health/scheduler` is deliberately **not** the container healthcheck.
+A stale sync job means the data is going stale, not that the container is
+broken - restarting it would neither fix the sync nor stop the restart
+loop. Point an external uptime monitor at it instead.
 
 ## Backfill fallback (optional, off by default)
 

@@ -5,7 +5,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
 from app.db.database import get_session
-from app.db.models import Fixture, PlayerMatchStat, ShotEvent, TeamMatchStat
+from app.db.models import (
+    Fixture,
+    GoalEvent,
+    PlayerMatchStat,
+    ShotEvent,
+    TeamMatchStat,
+)
 from app.schemas.goal import GoalListResponse, GoalOut
 from app.schemas.player_match_stat import (
     PlayerMatchStatListResponse,
@@ -104,6 +110,49 @@ async def list_goals(
     goalless - see `GoalListResponse`.
     """
     fixture = await _require_fixture(fixture_id, session)
+
+    # Real goal events first. Derived-from-shots is the fallback, kept for
+    # fixtures api-football has no mapping for and for competitions it does
+    # not cover - removing it would turn "we have xG but no events" into a
+    # blank response.
+    events = (
+        await session.exec(
+            select(GoalEvent)
+            .where(GoalEvent.fixture_id == fixture_id)
+            .order_by(GoalEvent.minute)
+        )
+    ).all()
+
+    if events:
+        return GoalListResponse(
+            fixture_id=fixture_id,
+            enriched=True,
+            source=events[0].source,
+            items=[
+                GoalOut(
+                    minute=event.minute,
+                    player_name=event.player_name,
+                    assist_player_name=event.assist_player_name,
+                    # api-football reports the team a goal counts for, so
+                    # this needs no flipping. Understat reports the
+                    # scorer's team, which is why the derived path below
+                    # does.
+                    team_id=event.team_id,
+                    player_team_id=(
+                        fixture.away_team_id
+                        if event.kind == "own_goal"
+                        and event.team_id == fixture.home_team_id
+                        else fixture.home_team_id
+                        if event.kind == "own_goal"
+                        else event.team_id
+                    ),
+                    is_own_goal=event.kind == "own_goal",
+                    xg=0.0,
+                )
+                for event in events
+            ],
+            total=len(events),
+        )
 
     shots = (
         await session.exec(

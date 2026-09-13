@@ -56,10 +56,23 @@ class NormalizedFixtureRef(BaseModel):
     kickoff_at: datetime
     home_team_name: str
     away_team_name: str
+    # Team ids come back in the same response, so mapping clubs costs
+    # nothing extra - and goal events are attributed by team ref, so
+    # without these there is no way to say which side scored.
+    home_team_external_ref: str
+    away_team_external_ref: str
     league_external_ref: str
 
 
-# api-football's `detail` on a Goal event.
+# api-football's `detail` on a `type: "Goal"` event.
+#
+# Not everything typed as a Goal is one. "Missed Penalty" arrives with
+# type "Goal" and detail "Missed Penalty" - filtering on type alone counts
+# it, which turned a real 1-1 into three goal events and a derived 2-1.
+#
+# So this map is an allow-list, and anything not in it is discarded rather
+# than assumed to be a goal. A new detail value appearing upstream should
+# cost us that event, not corrupt a scoreline.
 _GOAL_KIND = {
     "Normal Goal": "goal",
     "Own Goal": "own_goal",
@@ -161,6 +174,8 @@ class ApiFootballConnector:
                     ).astimezone(timezone.utc),
                     home_team_name=teams["home"]["name"],
                     away_team_name=teams["away"]["name"],
+                    home_team_external_ref=str(teams["home"]["id"]),
+                    away_team_external_ref=str(teams["away"]["id"]),
                     league_external_ref=str(league["id"]),
                 )
             )
@@ -182,6 +197,17 @@ class ApiFootballConnector:
         for event in payload.get("response", []):
             if event.get("type") != "Goal":
                 continue
+
+            kind = _GOAL_KIND.get(event.get("detail"))
+            if kind is None:
+                # "Missed Penalty" and anything else upstream files under
+                # Goal without a ball crossing the line.
+                logger.debug(
+                    f"Ignoring '{event.get('detail')}' on fixture {fixture_ref} "
+                    f"- typed as a Goal but not in the allow-list"
+                )
+                continue
+
             assist = (event.get("assist") or {}).get("name")
             goals.append(
                 NormalizedGoalEvent(
@@ -190,7 +216,7 @@ class ApiFootballConnector:
                     player_name=(event.get("player") or {}).get("name") or "Unknown",
                     assist_player_name=assist,
                     minute=(event.get("time") or {}).get("elapsed") or 0,
-                    kind=_GOAL_KIND.get(event.get("detail"), "goal"),
+                    kind=kind,
                 )
             )
         return goals

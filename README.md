@@ -131,7 +131,12 @@ season.
   club get reconciled.
 - `app/api/v1/` - the REST API your app calls:
   - `GET /leagues`, `GET /leagues/{id}`
-  - `GET /leagues/{id}/teams`
+  - `GET /leagues/{id}/teams` - each team carries both `short_name` as
+    synced and a `display_name` fit to render. Upstream short names are
+    usually right ("Borussia Dortmund" -> "Dortmund") but a handful are
+    nicknames ("Atleti", "Barça"); those are corrected by a small curated
+    map in `app/core/display_names.py`. The synced value is never
+    overwritten, so you can always reconcile against the source.
   - `GET /leagues/{id}/fixtures`, `GET /fixtures/{id}`
   - `GET /leagues/{id}/standings`
   - `GET /leagues/{id}/players` (season scorer stats)

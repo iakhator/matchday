@@ -34,7 +34,17 @@ class Team(SQLModel, table=True):
     season_year: int = Field(nullable=False)
 
     name: str = Field(nullable=False)
+
+    # As upstream sent it. Never overwritten, so the row can always be
+    # reconciled against the source.
     short_name: Optional[str] = Field(default=None)
+
+    # What to put in front of a user, resolved on write from
+    # app/core/display_names.py. Stored rather than computed so it can be
+    # searched, sorted and filtered on, and so anything else reading this
+    # database - admin tooling, a support query - sees the same name the
+    # API serves.
+    display_name: Optional[str] = Field(default=None, index=True)
     code: Optional[str] = Field(default=None, max_length=10)
     logo: Optional[str] = Field(default=None)
     venue: Optional[str] = Field(default=None)

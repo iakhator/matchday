@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.connectors.base import Connector
 from app.connectors.registry import get_connectors
 from app.core.config import settings
+from app.core.display_names import display_name
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.db.models import (
@@ -141,6 +142,12 @@ class SyncService:
             if existing:
                 existing.name = normalized.name
                 existing.short_name = normalized.short_name
+                # Re-resolved on every sync, so editing the override map
+                # takes effect on the next run rather than needing a
+                # backfill.
+                existing.display_name = display_name(
+                    normalized.name, normalized.short_name
+                )
                 existing.code = normalized.code
                 existing.logo = normalized.logo
                 existing.venue = normalized.venue
@@ -158,6 +165,9 @@ class SyncService:
                     season_year=season_year,
                     name=normalized.name,
                     short_name=normalized.short_name,
+                    display_name=display_name(
+                        normalized.name, normalized.short_name
+                    ),
                     code=normalized.code,
                     logo=normalized.logo,
                     venue=normalized.venue,

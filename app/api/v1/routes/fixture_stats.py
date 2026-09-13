@@ -8,11 +8,13 @@ from app.db.database import get_session
 from app.db.models import (
     Fixture,
     GoalEvent,
+    Odds,
     PlayerMatchStat,
     ShotEvent,
     TeamMatchStat,
 )
 from app.schemas.goal import GoalListResponse, GoalOut
+from app.schemas.odds import OddsListResponse, OddsOut
 from app.schemas.player_match_stat import (
     PlayerMatchStatListResponse,
     PlayerMatchStatOut,
@@ -231,4 +233,38 @@ async def list_goals(
         source=shots[0].source if shots else None,
         items=goals,
         total=len(goals),
+    )
+
+
+@router.get("/odds", response_model=OddsListResponse)
+async def list_odds(
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: ApiKey = Depends(require_api_key),
+):
+    """Pre-match 1X2 prices, one entry per bookmaker.
+
+    Captured before kickoff and never after: upstream serves odds only
+    while a fixture is upcoming, so an empty list for a finished match is
+    permanent rather than pending. `available` says which case you are in.
+
+    `captured_at` travels with each entry because prices move. Odds read a
+    day before kickoff and odds read ten minutes before are both valid and
+    mean different things, and presenting the former as current would be
+    worse than returning nothing.
+    """
+    await _require_fixture(fixture_id, session)
+
+    rows = (
+        await session.exec(
+            select(Odds).where(Odds.fixture_id == fixture_id).order_by(Odds.bookmaker)
+        )
+    ).all()
+
+    return OddsListResponse(
+        fixture_id=fixture_id,
+        available=bool(rows),
+        source=rows[0].source if rows else None,
+        items=[OddsOut.model_validate(row) for row in rows],
+        total=len(rows),
     )

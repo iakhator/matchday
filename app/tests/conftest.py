@@ -14,6 +14,7 @@ from app.db.models import (  # noqa: F401
     Fixture,
     GoalEvent,
     League,
+    Odds,
     PlayerMatchStat,
     PlayerStat,
     SchedulerHeartbeat,

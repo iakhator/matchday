@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     # app polling live scores, not for bulk export.
     DEFAULT_RATE_LIMIT_PER_MINUTE: int = 120
 
+    # api-football (api-sports.io). Supplies goal events and pre-match
+    # odds, which football-data.org's free tier does not carry.
+    API_FOOTBALL_KEY: Optional[str] = None
+    API_FOOTBALL_BASE_URL: str = "https://v3.football.api-sports.io"
+
+    # Their free plan allows 100 requests/day and there is no way to buy
+    # more once spent. Kept slightly under the real cap so a manual admin
+    # call is still possible after the scheduler has done its work.
+    API_FOOTBALL_DAILY_BUDGET: int = 90
+
     # Upstream connector credentials
     FOOTBALL_DATA_ORG_API_KEY: Optional[str] = None
     FOOTBALL_DATA_ORG_BASE_URL: str = "https://api.football-data.org/v4"

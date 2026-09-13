@@ -60,9 +60,9 @@ already exist but serve narrower purposes - see "Backfill fallback" below
 | Scores/results | Yes - synced continuously, with a ~7 minute upstream delay on the free tier ([measured](#how-fresh-is-the-data)) |
 | Standings, season scorers (goals/assists/appearances) | Yes - synced on their own cadence, see below |
 | Advanced match stats (xG, xA, xG-chain/buildup, PPDA, shot maps) | Optional - via Understat, reactively enriched right when a fixture finishes. Off by default; see "Backfill fallback" below for the tradeoff |
-| Goal events (scorer, assist, minute) | Yes, but derived from Understat shot data - football-data.org exposes none at this tier. Same `ENABLE_SOCCERDATA` caveat as the rest of the Understat data |
+| Goal events (scorer, assist, minute) | Yes - real events from api-football's free plan, including own goals and penalties. Falls back to Understat-derived goals for fixtures api-football has no mapping for |
 | Head-to-head, "most predicted outcome" | **No** - these are derivable from your own app's historical match/prediction data. Compute them in your app, not here. |
-| Betting odds | Not yet, but closer than it looks - football-data.org returns `"Activate Odds-Package in User-Panel"`, so it is a paid add-on on the existing account rather than a new connector to build |
+| Betting odds | Yes - pre-match 1X2 from several bookmakers, via api-football's free plan. Captured before kickoff and **not backfillable**: upstream serves odds only while a fixture is upcoming |
 
 ## Data licensing and attribution
 
@@ -111,7 +111,12 @@ season.
 
 - `app/connectors/` - the plugin interface (`Connector` ABC) + a real
   implementation against [football-data.org](https://www.football-data.org)
-  v4 (free tier, no credit card required). `understat.py` (advanced stats)
+  v4 (free tier, no credit card required), and
+  [api-football](https://www.api-football.com) for goal events and odds,
+  which football-data.org's free tier does not carry. The second is
+  complementary rather than a fallback: it supplies different data, not the
+  same data from elsewhere. Its free plan allows 100 requests/day, so the
+  connector counts what it spends and refuses work it cannot finish. `understat.py` (advanced stats)
   and `soccerdata_sofascore.py` (results backfill) are separate,
   narrower-purpose connectors - see "Backfill fallback" below.
 - `app/services/sync_service.py` - fetches from connectors (falling back to
@@ -143,12 +148,14 @@ season.
   - `GET /fixtures/{id}/player-stats`, `GET /fixtures/{id}/team-stats`,
     `GET /fixtures/{id}/shots` (Understat data, empty unless
     `ENABLE_SOCCERDATA=true`)
-  - `GET /fixtures/{id}/goals` - scorer, assister and minute. Derived from
-    the shot data rather than fetched separately, since football-data.org
-    has no goal events at this tier. Check the `enriched` flag before
-    reading an empty list as a goalless match: 0-0 and "no data" both
-    return nothing otherwise. Own goals are credited to the team they
-    count for, not the team of the player who scored them.
+  - `GET /fixtures/{id}/goals` - scorer, assister and minute. Check the
+    `enriched` flag before reading an empty list as a goalless match: 0-0
+    and "no data" both return nothing otherwise. Own goals are credited to
+    the team they count for, not the team of the player who scored them.
+  - `GET /fixtures/{id}/odds` - pre-match 1X2 per bookmaker, each with the
+    `captured_at` it was read. `available` distinguishes "nobody priced
+    this" from "never captured" - and since odds cannot be fetched after
+    kickoff, an empty list on a finished fixture is permanent.
   - `GET /lookup/{entity_type}?source=...&external_id=...` - translate
     another provider's ids into this gateway's. Takes several ids at once
     (comma-separated, up to 500) and returns `resolved` plus an explicit

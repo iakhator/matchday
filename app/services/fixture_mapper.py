@@ -38,6 +38,22 @@ from app.utils.datetime_utils import ensure_utc
 # double-header in a cup competition - cannot collide.
 KICKOFF_TOLERANCE = timedelta(hours=6)
 
+# Tighter bounds under which a match is treated as certain rather than
+# inferred. Both club names identical once normalized, and kickoffs within
+# an hour of each other.
+#
+# #4's rule is that a name match is a suggestion until a human confirms it,
+# and for *clubs* that holds - two different clubs in different countries
+# can normalize to the same string. A *fixture* is a stronger claim: to be
+# wrong here you would need two different matches, between the same two
+# clubs, kicking off within an hour of each other. That does not happen.
+#
+# The distinction matters practically. New fixtures arrive every week, so
+# requiring review for all of them would mean goals and odds never syncing
+# unattended - the mapping would be permanently behind the fixtures it
+# describes.
+EXACT_KICKOFF_TOLERANCE = timedelta(hours=1)
+
 
 class FixtureMapper:
     def __init__(self, session: AsyncSession, connector: ApiFootballConnector):
@@ -85,18 +101,25 @@ class FixtureMapper:
                 continue
 
             fixture = matches[0]
+            certain = await self._is_certain(fixture, candidate)
             await self.ids.link(
                 EntityType.FIXTURE,
                 self.connector.source,
                 candidate.external_ref,
                 fixture.id,
-                # Matched on names and kickoff, not on an identifier either
-                # provider published. That is an inference, and #4's rule is
-                # that an inference is a suggestion until a human confirms
-                # it.
-                verified=False,
+                # Exact on both clubs and within an hour: certain. Anything
+                # looser was inferred from a fuzzy name match and stays
+                # unverified for review, per #4.
+                verified=certain,
             )
             created[candidate.external_ref] = fixture.id
+
+            # Map the two clubs at the same time. Goal events are
+            # attributed by team ref, so a fixture mapping alone is not
+            # enough to say which side scored - and the ids are already in
+            # the response, so this costs no extra request.
+            if certain:
+                await self._map_teams(fixture, candidate)
 
         await self.session.commit()
         logger.info(
@@ -104,6 +127,38 @@ class FixtureMapper:
             f"({len(ours)} held, {len(theirs)} offered, {ambiguous} ambiguous)"
         )
         return created
+
+    async def _map_teams(self, ours: Fixture, theirs: NormalizedFixtureRef) -> None:
+        """Link both clubs, only when the fixture itself matched exactly.
+
+        Deriving a club mapping from a fixture is safe precisely because
+        the fixture was certain: if this is definitely the same match, the
+        home side is definitely the same club.
+        """
+        for team_id, ref in (
+            (ours.home_team_id, theirs.home_team_external_ref),
+            (ours.away_team_id, theirs.away_team_external_ref),
+        ):
+            if await self.ids.resolve(EntityType.TEAM, self.connector.source, ref):
+                continue
+            await self.ids.link(
+                EntityType.TEAM, self.connector.source, ref, team_id, verified=True
+            )
+
+    async def _is_certain(self, ours: Fixture, theirs: NormalizedFixtureRef) -> bool:
+        """Strong enough to act on without review - see
+        EXACT_KICKOFF_TOLERANCE."""
+        if abs(ensure_utc(ours.kickoff_at) - theirs.kickoff_at) > EXACT_KICKOFF_TOLERANCE:
+            return False
+
+        home = await self.session.get(Team, ours.home_team_id)
+        away = await self.session.get(Team, ours.away_team_id)
+        if not home or not away:
+            return False
+
+        return _exact_club(home, theirs.home_team_name) and _exact_club(
+            away, theirs.away_team_name
+        )
 
     async def _our_fixtures_on(self, on: date) -> List[Fixture]:
         """Fixtures we hold with a kickoff on `on`, give or take the
@@ -161,6 +216,23 @@ def _same_club(team: Team, other_name: str) -> bool:
         ):
             return True
     return False
+
+
+def _exact_club(team: Team, other_name: str) -> bool:
+    """Identical once normalized - no prefix matching.
+
+    `_same_club` accepts "Brighton" for "Brighton & Hove Albion FC", which
+    is right for finding a candidate and too loose for declaring certainty:
+    a prefix match would also accept "Real" for "Real Sociedad".
+    """
+    theirs = normalize(other_name)
+    if not theirs:
+        return False
+    return any(
+        normalize(candidate) == theirs
+        for candidate in (team.name, team.short_name, team.display_name)
+        if candidate
+    )
 
 
 def _as_datetime(on: date):

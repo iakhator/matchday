@@ -1,5 +1,6 @@
 from app.db.models.external_id import EntityType, ExternalId
 from app.db.models.fixture import Fixture
+from app.db.models.goal_event import GoalEvent
 from app.db.models.league import League
 from app.db.models.player_match_stat import PlayerMatchStat
 from app.db.models.player_stat import PlayerStat
@@ -15,6 +16,7 @@ __all__ = [
     "League",
     "Team",
     "Fixture",
+    "GoalEvent",
     "Standing",
     "PlayerStat",
     "PlayerMatchStat",

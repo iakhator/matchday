@@ -12,6 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.db.models import (  # noqa: F401
     ExternalId,
     Fixture,
+    GoalEvent,
     League,
     PlayerMatchStat,
     PlayerStat,

@@ -84,12 +84,14 @@ async def _seed(session, pairs, kickoff=KICKOFF, offset=0):
     return fixtures
 
 
-def _theirs(ref, home, away, kickoff=KICKOFF):
+def _theirs(ref, home, away, kickoff=KICKOFF, home_ref="500", away_ref="501"):
     return NormalizedFixtureRef(
         external_ref=ref,
         kickoff_at=kickoff,
         home_team_name=home,
         away_team_name=away,
+        home_team_external_ref=home_ref,
+        away_team_external_ref=away_ref,
         league_external_ref="39",
     )
 
@@ -111,9 +113,14 @@ class TestMatching:
             == fixture.id
         )
 
-    async def test_mapping_is_unverified(self, test_session):
-        """Matched on names and kickoff, not on a published identifier.
-        That is an inference, and an inference is a suggestion."""
+    async def test_an_exact_match_is_trusted_without_review(self, test_session):
+        """Both clubs identical once normalized, kickoffs within an hour.
+
+        To be wrong here you would need two different matches between the
+        same two clubs kicking off within an hour of each other, which does
+        not happen - so this is certainty, not inference. It has to work
+        unattended: new fixtures arrive weekly, and requiring review for
+        each would leave goals and odds permanently behind."""
         await _seed(test_session, [("Arsenal FC", "Chelsea FC")])
         mapper = FixtureMapper(
             test_session, FakeConnector([_theirs("999", "Arsenal", "Chelsea")])
@@ -121,7 +128,53 @@ class TestMatching:
         await mapper.map_date(MATCHDAY)
 
         [row] = await IdMapper(test_session).aliases(EntityType.FIXTURE, 10_000_500)
+        assert row.verified is True
+
+    async def test_a_fuzzy_match_stays_unverified(self, test_session):
+        """ "Brighton" only matches "Brighton & Hove Albion FC" by prefix.
+        Good enough to propose, not to act on - #4's rule."""
+        await _seed(test_session, [("Brighton & Hove Albion FC", "Chelsea FC")])
+        mapper = FixtureMapper(
+            test_session, FakeConnector([_theirs("999", "Brighton", "Chelsea")])
+        )
+        await mapper.map_date(MATCHDAY)
+
+        [row] = await IdMapper(test_session).aliases(EntityType.FIXTURE, 10_000_500)
         assert row.verified is False
+
+    async def test_clubs_are_mapped_alongside_a_certain_fixture(self, test_session):
+        """Goal events are attributed by team ref, so a fixture mapping
+        alone cannot say which side scored. The ids are in the same
+        response, so this costs no extra request."""
+        await _seed(test_session, [("Arsenal FC", "Chelsea FC")])
+        mapper = FixtureMapper(
+            test_session,
+            FakeConnector(
+                [_theirs("999", "Arsenal", "Chelsea", home_ref="42", away_ref="49")]
+            ),
+        )
+        await mapper.map_date(MATCHDAY)
+
+        ids = IdMapper(test_session)
+        assert await ids.resolve(EntityType.TEAM, "api_football", "42") == 10_000_000
+        assert await ids.resolve(EntityType.TEAM, "api_football", "49") == 10_000_001
+
+    async def test_clubs_are_not_mapped_from_a_fuzzy_fixture(self, test_session):
+        """Deriving a club mapping from an uncertain fixture would spread
+        one guess into two."""
+        await _seed(test_session, [("Brighton & Hove Albion FC", "Chelsea FC")])
+        mapper = FixtureMapper(
+            test_session,
+            FakeConnector(
+                [_theirs("999", "Brighton", "Chelsea", home_ref="42", away_ref="49")]
+            ),
+        )
+        await mapper.map_date(MATCHDAY)
+
+        assert (
+            await IdMapper(test_session).resolve(EntityType.TEAM, "api_football", "42")
+            is None
+        )
 
     async def test_matches_through_the_display_name(self, test_session):
         """Providers publish different forms of a club's name. Brighton is

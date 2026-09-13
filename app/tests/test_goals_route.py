@@ -58,11 +58,11 @@ async def fixture(test_session):
     return row
 
 
-def _shot(ref, player, minute, result, team_id, assist=None):
+def _shot(ref, player, minute, result, team_id, assist=None, xg=0.5, x=0.9, y=0.5):
     return ShotEvent(
         fixture_id=FIXTURE_ID, team_id=team_id, source="understat",
         external_ref=ref, player_name=player, assist_player_name=assist,
-        minute=minute, xg=0.5, location_x=0.9, location_y=0.5, result=result,
+        minute=minute, xg=xg, location_x=x, location_y=y, result=result,
     )
 
 
@@ -110,6 +110,19 @@ class TestGoals:
 
         body = (await client.get(f"/api/v1/fixtures/{FIXTURE_ID}/goals")).json()
         assert body["total"] == 1
+
+    async def test_two_distinct_shots_in_one_minute_are_both_kept(
+        self, client, test_session, fixture
+    ):
+        """A rebound is real. Deduplicating on (minute, player, result)
+        alone would delete one of these - 13 fixtures in the live data have
+        exactly this shape."""
+        test_session.add(_shot("1", "Striker", 52, "Goal", HOME_ID, xg=0.07, x=0.86))
+        test_session.add(_shot("2", "Striker", 52, "Goal", HOME_ID, xg=0.04, x=0.81))
+        await test_session.commit()
+
+        body = (await client.get(f"/api/v1/fixtures/{FIXTURE_ID}/goals")).json()
+        assert body["total"] == 2
 
     async def test_same_player_scoring_in_different_minutes_is_two_goals(
         self, client, test_session, fixture

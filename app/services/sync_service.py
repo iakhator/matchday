@@ -314,6 +314,16 @@ class SyncService:
             )
         logger.info(f"Synced {len(fixtures)} fixtures for league {league.name}")
 
+        # Goal events, the moment a match actually finishes. Reactive
+        # rather than scheduled on purpose: a finished match's goals never
+        # change, so polling for them would spend a 100/day budget to learn
+        # nothing. No-ops if api-football is not configured.
+        for fixture in newly_finished:
+            try:
+                await self._sync_goal_events(fixture)
+            except Exception as e:  # noqa: BLE001 - one fixture must not fail the sync
+                logger.warning(f"Goal event sync failed for fixture {fixture.id}: {e}")
+
         # Reactive, not scheduled - enrich a fixture with Understat's
         # advanced stats right when it actually finishes, same trigger
         # pattern as standings/player-stats sync elsewhere in this
@@ -328,6 +338,26 @@ class SyncService:
                     )
 
         return fixtures
+
+    async def _sync_goal_events(self, fixture: Fixture) -> None:
+        """Fetch this fixture's goals from api-football, if configured.
+
+        Kept here rather than in the scheduler so it fires on the same
+        transition the rest of the post-match enrichment does - a fixture
+        flipping to finished - instead of a job having to rediscover which
+        matches have just ended.
+        """
+        from app.connectors.api_football import ApiFootballConnector
+        from app.services.goal_event_service import GoalEventService
+
+        try:
+            connector = ApiFootballConnector()
+        except RuntimeError:
+            # No key. Running on football-data.org alone is a valid
+            # deployment; goals simply fall back to the derived path.
+            return
+
+        await GoalEventService(self.session, connector).sync_fixture(fixture)
 
     async def sync_standings(self, league: League, season_year: int) -> List[Standing]:
         connectors: List[Connector] = get_connectors()

@@ -35,6 +35,14 @@ JOB_GRACE_SECONDS: Dict[str, int] = {
     "sync_live_fixtures": max(
         SchedulerConfig.LIVE_FIXTURE_SYNC_INTERVAL_SECONDS * 2, 300
     ),
+    "map_api_football_fixtures": (
+        SchedulerConfig.FIXTURE_MAPPING_INTERVAL_MINUTES * 60 * 2
+    ),
+    # Tighter than 2x for this one. Odds cannot be fetched after kickoff,
+    # so a capture job that has quietly stopped is losing data permanently
+    # with every hour it stays stopped - worth hearing about after two
+    # missed runs rather than letting a whole matchday pass.
+    "capture_odds": SchedulerConfig.ODDS_CAPTURE_INTERVAL_MINUTES * 60 * 2,
 }
 
 

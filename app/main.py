@@ -8,6 +8,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.heartbeat import get_job_health, seed_heartbeats_on_startup
 from app.core.logger import logger
+from app.core.versioning import API_VERSION
 from app.db.database import async_session, get_session
 from app.scheduler.start_scheduler import start_scheduler, stop_scheduler
 
@@ -37,12 +38,26 @@ async def lifespan(app: FastAPI):
     logger.info("Shut down cleanly")
 
 
+# This metadata is the customer-facing documentation: /docs and
+# /openapi.json are generated from it, so it is written for someone
+# deciding whether to build against this API, not for a maintainer.
 app = FastAPI(
-    title="matchday-gateway",
+    title="Matchday API",
+    version=API_VERSION,
     description=(
-        "Self-hosted football data gateway. Aggregates leagues, teams, "
-        "fixtures and scores from pluggable upstream connectors and "
-        "serves them through a stable REST API."
+        "Football data - competitions, teams, fixtures, live scores, "
+        "standings and player statistics - served through one stable REST "
+        "API.\n\n"
+        "Identifiers belong to this API, not to whichever upstream source "
+        "the data came from, so sources can change without your "
+        "integration changing. Use `/api/v1/lookup` to translate "
+        "identifiers you already hold from another provider.\n\n"
+        "Authenticate with an `X-Gateway-Key` header. Rate limits are per "
+        "key; exceeding one returns `429` with `Retry-After`.\n\n"
+        "**Stability:** within `/api/v1`, changes are additive only. "
+        "Breaking changes ship as a new version path alongside this one, "
+        "and anything being retired carries `Deprecation` and `Sunset` "
+        "headers first."
     ),
     lifespan=lifespan,
 )

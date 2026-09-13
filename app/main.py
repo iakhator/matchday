@@ -15,6 +15,20 @@ from app.scheduler.start_scheduler import start_scheduler, stop_scheduler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} ({settings.ENVIRONMENT})")
+
+    if settings.ENABLE_SOCCERDATA:
+        # Said out loud at startup, not only in the README. Someone
+        # inheriting this deployment - or enabling the flag for the xG data
+        # without reading why it is off by default - should not have to go
+        # looking to find out what it turned on.
+        logger.warning(
+            "ENABLE_SOCCERDATA is on. The Understat and Sofascore connectors "
+            "reach their sources through TLS fingerprint spoofing "
+            "(soccerdata/tls_requests), which is deliberate evasion of bot "
+            "detection rather than an API call with a key. See the README "
+            "section 'Optional connectors, and the tradeoff they carry'."
+        )
+
     async with async_session() as session:
         await seed_heartbeats_on_startup(session)
     start_scheduler()

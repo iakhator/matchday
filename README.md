@@ -26,7 +26,7 @@ third-party vendor.
 - [Mapping ids from another provider](#mapping-ids-from-another-provider)
 - [Local development](#local-development)
 - [Deploying](#deploying)
-- [Backfill fallback](#backfill-fallback-optional-off-by-default)
+- [Optional connectors, and the tradeoff they carry](#optional-connectors-and-the-tradeoff-they-carry)
 - [Consuming this from another app](#consuming-this-from-another-app)
 - [Status](#status)
 
@@ -475,10 +475,43 @@ stale job means the data is going stale, not that the container is broken.
 Restarting would neither fix the sync nor stop the restart loop - it would
 just add an outage to a staleness problem.
 
-## Backfill fallback (optional, off by default)
+## Optional connectors, and the tradeoff they carry
 
-One flag, `ENABLE_SOCCERDATA`, gates two separate `soccerdata`-powered
-connectors:
+One flag, `ENABLE_SOCCERDATA`, gates two `soccerdata`-powered connectors.
+It is **off by default**, and `soccerdata` is not installed unless you ask
+for it (`uv sync --extra soccerdata`), so nothing below happens unless you
+opt in twice.
+
+> **Both connectors reach their sources through TLS fingerprint spoofing.**
+>
+> `soccerdata`'s HTTP layer (`tls_requests`, built on
+> `bogdanfinn/tls-client`) replicates a real browser's TLS handshake so
+> that bot detection cannot distinguish it from Chrome. That is a
+> materially different thing from calling a documented API with a key: it
+> is deliberate evasion of an access control the site put up on purpose,
+> even though the data itself - public match scores and shot locations -
+> is harmless.
+>
+> This applies to **both** connectors, not just Sofascore. `Understat`
+> extends the same `BaseRequestsReader`, whose `_init_session` returns a
+> `tls_requests.Client`. Enabling the flag for advanced stats alone does
+> not avoid it.
+>
+> Enable this only if you are comfortable with that on your own
+> deployment. It is off by default precisely so that choice is yours to
+> make explicitly rather than inherit by installing this project.
+>
+> **Not for a hosted service.** Running this on your own machine for your
+> own data is one decision; serving data obtained this way to paying
+> customers is a materially different one, and it puts the liability on
+> the operator rather than on the person who chose to enable a flag. Keep
+> `ENABLE_SOCCERDATA=false` on anything you host for others.
+
+Note that `GET /fixtures/{id}/goals` is derived from Understat shot data,
+so goal events are part of what this flag gates - football-data.org
+exposes none at the free tier.
+
+The two connectors:
 
 - **Understat advanced stats** (`app/connectors/understat.py`) - runs
   automatically, reactively, the moment a fixture's status flips to
@@ -498,15 +531,9 @@ the registry:
    serve live scores, only after-the-fact results.
 2. Fetching a season's schedule costs roughly one HTTP request per round
    (~40 requests) - too expensive to run automatically on a schedule.
-3. **It uses TLS fingerprint spoofing to get past Sofascore's bot
-   detection.** The `soccerdata` library's HTTP layer (`tls_requests`,
-   built on `bogdanfinn/tls-client`) replicates a real browser's TLS
-   handshake so Sofascore's detection can't tell the difference. That's a
-   materially different thing from calling a documented API with a key -
-   it's deliberate evasion of an access control the site put up on
-   purpose, even though the data itself (public match scores) is
-   harmless. Enable this only if you're comfortable with that tradeoff for
-   your own deployment.
+3. It shares the TLS-spoofing HTTP layer described above - as does the
+   Understat connector. That is a property of `soccerdata` itself, not of
+   this particular reader.
 
 To use it:
 

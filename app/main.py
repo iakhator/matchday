@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.v1.router import api_router
 from app.core.config import settings
-from app.core.heartbeat import get_stale_jobs, seed_heartbeats_on_startup
+from app.core.heartbeat import get_job_health, seed_heartbeats_on_startup
 from app.core.logger import logger
 from app.db.database import async_session, get_session
 from app.scheduler.start_scheduler import start_scheduler, stop_scheduler
@@ -46,8 +47,21 @@ async def health_scheduler(session: AsyncSession = Depends(get_session)):
     lapsed - see app/core/heartbeat.py for why this exists and how
     staleness is decided. Point an external uptime monitor at this
     instead of relying on someone noticing a silently dead scheduler."""
-    stale_jobs = await get_stale_jobs(session)
-    return {
+    jobs = await get_job_health(session)
+    stale_jobs = [job["job_id"] for job in jobs if job["stale"]]
+
+    body = {
         "status": "unhealthy" if stale_jobs else "healthy",
         "stale_jobs": stale_jobs,
+        "jobs": jobs,
     }
+
+    # 503, not 200-with-a-sad-body. Uptime monitors alert on the status
+    # code by default - UptimeRobot, BetterStack, Pingdom, Kubernetes
+    # probes all do. This endpoint previously returned 200 while saying
+    # "unhealthy", so a monitor pointed at it would have stayed quiet
+    # forever while the scheduler was dead: the exact failure it exists to
+    # catch, defeated by the status code.
+    if stale_jobs:
+        return JSONResponse(status_code=503, content=body)
+    return body

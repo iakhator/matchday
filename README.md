@@ -417,14 +417,63 @@ Optional: `PORT` (default 8010) and `WEB_CONCURRENCY` (default 1). Raise
 workers only having read the rate-limit note above - limits are counted
 per process, so N workers allow N times the configured rate.
 
-### Health
+### Health and monitoring
 
-`GET /health` is liveness, and is what the image's own `HEALTHCHECK` uses.
+Two endpoints, both unauthenticated so a monitor needs no credentials.
 
-`GET /health/scheduler` is deliberately **not** the container healthcheck.
-A stale sync job means the data is going stale, not that the container is
-broken - restarting it would neither fix the sync nor stop the restart
-loop. Point an external uptime monitor at it instead.
+**`GET /health`** - liveness. Is the process up? This is what the image's
+`HEALTHCHECK` uses.
+
+**`GET /health/scheduler`** - is the data still being kept up to date?
+Returns **503** when any job's heartbeat has gone stale, and 200 otherwise:
+
+```json
+{
+  "status": "unhealthy",
+  "stale_jobs": ["sync_standings_and_players"],
+  "jobs": [
+    {"job_id": "sync_fixtures", "last_run_at": "2026-09-13T07:48:11+00:00",
+     "age_seconds": 186, "threshold_seconds": 1800, "stale": false},
+    {"job_id": "sync_standings_and_players", "last_run_at": "...",
+     "age_seconds": 40219, "threshold_seconds": 3600, "stale": true}
+  ]
+}
+```
+
+The status code matters more than the body. Uptime monitors alert on it by
+default, and this endpoint used to return 200 while saying "unhealthy" -
+so a monitor pointed at it would have stayed quiet forever while the
+scheduler was dead. That is the precise failure it exists to catch.
+
+Each job is measured against twice its own interval, so one slow cycle
+never trips it. A fresh deploy seeds heartbeats rather than reporting
+every job stale until it first runs; a restart does **not** reset a
+genuinely stale job back to healthy.
+
+### Wiring up a monitor
+
+Point any uptime service at `https://your-gateway/health/scheduler` and
+alert on non-2xx. Suggested check interval: 5 minutes - the tightest
+threshold is 5 minutes (the live-score job), so anything faster only adds
+noise.
+
+```bash
+# Or without a service, from anywhere with cron:
+*/5 * * * * curl -fsS https://your-gateway/health/scheduler \
+  || echo "matchday scheduler unhealthy" | mail -s "matchday" you@example.com
+```
+
+`curl -f` exits non-zero on 503, so the alert fires on exactly the
+condition the endpoint reports.
+
+**Route the alert somewhere you will actually see it.** An alert into a
+channel nobody reads is indistinguishable from no alert, and a silently
+dead sync job is what this whole mechanism is for.
+
+**`/health/scheduler` is deliberately not the container healthcheck.** A
+stale job means the data is going stale, not that the container is broken.
+Restarting would neither fix the sync nor stop the restart loop - it would
+just add an outage to a staleness problem.
 
 ## Backfill fallback (optional, off by default)
 

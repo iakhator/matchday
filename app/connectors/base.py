@@ -29,7 +29,12 @@ class NormalizedFixture(BaseModel):
     home_team_external_ref: str
     away_team_external_ref: str
     kickoff_at: datetime
-    status: str  # must be one of app.db.models.fixture.FIXTURE_STATUSES
+    # One of app.db.models.fixture.FIXTURE_STATUSES, or None when upstream
+    # sent something unrecognized. None means "no opinion" - a connector
+    # must not guess, because the sync path overwrites the stored status
+    # and a guess of "scheduled" reopens a match that has already been
+    # played. See SyncService.sync_fixtures.
+    status: Optional[str]
     raw_status: Optional[str] = None
     home_score: Optional[int] = None
     away_score: Optional[int] = None

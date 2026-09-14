@@ -268,7 +268,16 @@ class SyncService:
                     existing.status != "finished" and normalized.status == "finished"
                 )
                 existing.matchday = normalized.matchday
-                existing.status = normalized.status
+                # A connector returning None has no opinion - upstream sent
+                # something it did not recognise. Keep what we already know
+                # rather than overwriting it. This matters: upstream briefly
+                # put a kickoff timestamp in the status field, and the old
+                # behaviour of defaulting to "scheduled" flipped matches
+                # that were being played back to upcoming. It healed on the
+                # next sync, but in the meantime a consumer would have had
+                # predictions open on a live match.
+                if normalized.status is not None:
+                    existing.status = normalized.status
                 existing.raw_status = normalized.raw_status
                 existing.home_score = normalized.home_score
                 existing.away_score = normalized.away_score
@@ -286,7 +295,11 @@ class SyncService:
                     home_team_id=home_team_id,
                     away_team_id=away_team_id,
                     kickoff_at=normalized.kickoff_at,
-                    status=normalized.status,
+                    # Nothing stored to preserve for a brand-new fixture,
+                    # so "scheduled" is the only safe assumption - and a
+                    # fixture first seen with an unreadable status is far
+                    # more likely to be upcoming than finished.
+                    status=normalized.status or "scheduled",
                     raw_status=normalized.raw_status,
                     home_score=normalized.home_score,
                     away_score=normalized.away_score,

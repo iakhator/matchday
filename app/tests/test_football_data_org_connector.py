@@ -80,11 +80,15 @@ class TestFetchFixtures:
         assert fixtures[0].status == "live"
         assert fixtures[0].raw_status == "IN_PLAY"
 
-    async def test_unrecognized_status_defaults_to_scheduled(self, monkeypatch):
-        # football-data.org could introduce a new status string without
-        # warning - this must never crash the sync, and it must never
-        # silently classify a match as "finished" when we don't actually
-        # know that.
+    async def test_unrecognized_status_becomes_no_opinion(self, monkeypatch):
+        """Upstream can introduce a new status without warning, and has
+        sent outright nonsense - a kickoff timestamp in the status field.
+
+        The connector must not guess. It previously defaulted to
+        "scheduled", which the sync path then wrote over the stored value,
+        flipping matches that were being played back to upcoming. None
+        means "no opinion", and the caller keeps what it already knows.
+        """
         connector = make_connector(monkeypatch)
         stub_get(
             connector,
@@ -92,8 +96,37 @@ class TestFetchFixtures:
             {"matches": [_match(status="SOME_NEW_STATUS_WE_DONT_KNOW")]},
         )
         fixtures = await connector.fetch_fixtures("PL", 2026)
-        assert fixtures[0].status == "scheduled"
+        assert fixtures[0].status is None
+        # Kept, so what upstream actually said is recoverable.
         assert fixtures[0].raw_status == "SOME_NEW_STATUS_WE_DONT_KNOW"
+
+    async def test_a_timestamp_in_the_status_field_is_not_a_status(self, monkeypatch):
+        """The real case: upstream put '2026-10-11 16:30:00Z' in `status`
+        for matches near kickoff."""
+        connector = make_connector(monkeypatch)
+        stub_get(
+            connector, monkeypatch, {"matches": [_match(status="2026-10-11 16:30:00Z")]}
+        )
+        assert (await connector.fetch_fixtures("PL", 2026))[0].status is None
+
+    async def test_unrecognized_statuses_are_logged_once_per_fetch(
+        self, monkeypatch, caplog
+    ):
+        """One bad status per match produced 2,634 warning lines in a single
+        log, which buried everything else. A warning that fires thousands of
+        times hides the next real one."""
+        connector = make_connector(monkeypatch)
+        stub_get(
+            connector,
+            monkeypatch,
+            {"matches": [_match(status="BAD", id=i) for i in range(1, 21)]},
+        )
+        with caplog.at_level("WARNING"):
+            await connector.fetch_fixtures("PL", 2026)
+
+        warnings = [r for r in caplog.records if "unrecognized status" in r.message]
+        assert len(warnings) == 1
+        assert "20 fixture(s)" in warnings[0].message
 
     async def test_missing_score_stays_none(self, monkeypatch):
         connector = make_connector(monkeypatch)

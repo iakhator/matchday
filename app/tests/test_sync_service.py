@@ -267,3 +267,81 @@ class TestHasLiveWindowFixtures:
     async def test_false_for_unknown_competition(self, test_session, monkeypatch):
         service, _league = await self._service_with_league(test_session, monkeypatch)
         assert await service.has_live_window_fixtures("XX") is False
+
+
+class TestUnknownStatusDoesNotOverwrite:
+    """Upstream briefly put a kickoff timestamp in the status field.
+
+    The old behaviour defaulted that to "scheduled" and wrote it over the
+    stored value, flipping matches that were being played back to upcoming.
+    It healed on the next sync, but in between a consumer would have had
+    predictions open on a live match.
+    """
+
+    async def _synced(self, test_session, monkeypatch, status):
+        connector = FakeConnector(
+            "primary",
+            league=make_league_normalized(),
+            teams=[
+                NormalizedTeam(external_ref="57", name="Arsenal"),
+                NormalizedTeam(external_ref="61", name="Chelsea"),
+            ],
+        )
+        monkeypatch.setattr(
+            "app.services.sync_service.get_connectors", lambda: [connector]
+        )
+        service = SyncService(test_session)
+        league = await service.sync_league("PL")
+        await service.sync_teams(league, 2026)
+        connector._fixtures = [
+            NormalizedFixture(
+                external_ref="999",
+                home_team_external_ref="57",
+                away_team_external_ref="61",
+                kickoff_at=utcnow(),
+                status=status,
+                home_score=2,
+                away_score=1,
+            )
+        ]
+        return service, league, connector
+
+    async def test_a_finished_match_is_not_flipped_back_to_scheduled(
+        self, test_session, monkeypatch
+    ):
+        service, league, connector = await self._synced(
+            test_session, monkeypatch, "finished"
+        )
+        await service.sync_fixtures(league, 2026)
+
+        # Upstream now sends something unreadable for the same fixture.
+        connector._fixtures[0].status = None
+        await service.sync_fixtures(league, 2026)
+
+        [fixture] = (await test_session.exec(select(Fixture))).all()
+        assert fixture.status == "finished"
+
+    async def test_a_readable_status_still_updates(self, test_session, monkeypatch):
+        """The guard must not freeze a fixture's status permanently."""
+        service, league, connector = await self._synced(
+            test_session, monkeypatch, "scheduled"
+        )
+        await service.sync_fixtures(league, 2026)
+
+        connector._fixtures[0].status = "finished"
+        await service.sync_fixtures(league, 2026)
+
+        [fixture] = (await test_session.exec(select(Fixture))).all()
+        assert fixture.status == "finished"
+
+    async def test_a_new_fixture_with_no_readable_status_is_scheduled(
+        self, test_session, monkeypatch
+    ):
+        """Nothing stored to preserve, so "scheduled" is the only safe
+        assumption - a fixture first seen with an unreadable status is far
+        more likely upcoming than finished."""
+        service, league, connector = await self._synced(test_session, monkeypatch, None)
+        await service.sync_fixtures(league, 2026)
+
+        [fixture] = (await test_session.exec(select(Fixture))).all()
+        assert fixture.status == "scheduled"

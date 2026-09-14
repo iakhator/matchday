@@ -128,15 +128,16 @@ class FootballDataOrgConnector(Connector):
         )
 
         fixtures = []
+        unrecognized = {}
         for match in data.get("matches", []):
             raw_status = match.get("status", "")
             status = _STATUS_MAP.get(raw_status)
             if status is None:
-                logger.warning(
-                    f"Unrecognized football-data.org status '{raw_status}' "
-                    f"on match {match.get('id')} - defaulting to 'scheduled'"
-                )
-                status = "scheduled"
+                # Collected, not logged here. Upstream briefly returned a
+                # kickoff timestamp in this field for matches near kickoff
+                # and produced 2,634 warning lines in one log, which made
+                # every other message unfindable.
+                unrecognized[raw_status] = unrecognized.get(raw_status, 0) + 1
 
             score = match.get("score") or {}
             full_time = score.get("fullTime") or {}
@@ -158,6 +159,20 @@ class FootballDataOrgConnector(Connector):
                     away_score=full_time.get("away"),
                 )
             )
+
+        if unrecognized:
+            # One line for the whole fetch, with a sample. A warning that
+            # fires thousands of times is not a warning, it is noise that
+            # hides the next real one.
+            sample = ", ".join(
+                f"{value!r} x{count}" for value, count in list(unrecognized.items())[:3]
+            )
+            logger.warning(
+                f"{sum(unrecognized.values())} fixture(s) in {competition_code} had "
+                f"an unrecognized status ({sample}). Their stored status is left "
+                f"unchanged rather than guessed."
+            )
+
         return fixtures
 
     async def fetch_standings(

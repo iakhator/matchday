@@ -1,0 +1,13 @@
+{
+  "MD033": {
+    "allowed_elements": [
+      "MethodBadge",
+      "EndpointMeta",
+      "ParamCard",
+      "ErrorCode",
+      "ClientOnly",
+      "code"
+    ]
+  },
+  "MD041": false
+}

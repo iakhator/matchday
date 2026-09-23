@@ -119,3 +119,54 @@ async def revoke_key(
         await session.refresh(record)
 
     return record
+
+
+@router.post("/keys/{key_id}/rotate", response_model=ApiKeyCreatedOut)
+async def rotate_key(
+    key_id: uuid.UUID,
+    user: User = Depends(require_firebase_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Revoke the old key and generate its replacement in one request,
+    carrying over its name and rate limit. Same safety property as
+    create_key - the plaintext is shown exactly once, here - just without
+    making the caller do it as two separate manual steps.
+
+    Doesn't touch MAX_API_KEYS_PER_USER: the old key stops counting as
+    live in the same commit the new one starts counting, so the live
+    count this account holds never changes because of a rotation.
+    """
+    old = (
+        await session.exec(
+            select(ApiKeyRecord).where(
+                ApiKeyRecord.id == key_id, ApiKeyRecord.owner_user_id == user.id
+            )
+        )
+    ).first()
+    if old is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    if old.revoked_at is None:
+        old.revoked_at = utcnow()
+        session.add(old)
+
+    plaintext, prefix, hashed = generate_secret()
+    new_record = ApiKeyRecord(
+        owner_user_id=user.id,
+        name=old.name,
+        key_prefix=prefix,
+        hashed_secret=hashed,
+        requests_per_minute=old.requests_per_minute,
+    )
+    session.add(new_record)
+    await session.commit()
+    await session.refresh(new_record)
+
+    return ApiKeyCreatedOut(
+        id=new_record.id,
+        name=new_record.name,
+        key_prefix=new_record.key_prefix,
+        secret=plaintext,
+        requests_per_minute=new_record.requests_per_minute,
+        created_at=new_record.created_at,
+    )

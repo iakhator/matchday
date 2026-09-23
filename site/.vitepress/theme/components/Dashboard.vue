@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRouter } from "vitepress";
 import { useAuth } from "../composables/useAuth";
 import {
   listKeys,
   createKey,
   revokeKey,
+  rotateKey,
   type ApiKeySummary,
 } from "../gatewayApi";
 
@@ -17,10 +18,20 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const newKeyName = ref("");
 const creating = ref(false);
-// Set exactly once, right after creation - never re-populated from the
-// list endpoint, which never returns a secret at all.
+const rotatingId = ref<string | null>(null);
+// Set exactly once, right after creation or rotation - never
+// re-populated from the list endpoint, which never returns a secret at
+// all.
 const justCreatedSecret = ref<string | null>(null);
 const copied = ref(false);
+
+// Drives which create UI shows: a one-click "generate your first key"
+// button with no typing (liveKeyCount === 0), or the named form for
+// adding another once at least one already exists. Both still require an
+// explicit click either way - see the commit message for why this isn't
+// auto-created on page load instead (a page render having a side effect
+// is the wrong shape, even for a "default" key).
+const liveKeyCount = computed(() => keys.value.filter((k) => !k.revoked_at).length);
 
 watch(
   [user, authReady],
@@ -51,14 +62,14 @@ watch(user, (u) => {
   if (u) refresh();
 });
 
-async function onCreate() {
+async function onCreate(name: string) {
   const token = await idToken();
-  if (!token || !newKeyName.value.trim()) return;
+  if (!token || !name.trim()) return;
   creating.value = true;
   error.value = null;
   justCreatedSecret.value = null;
   try {
-    const created = await createKey(token, newKeyName.value.trim());
+    const created = await createKey(token, name.trim());
     justCreatedSecret.value = created.secret;
     newKeyName.value = "";
     await refresh();
@@ -78,6 +89,23 @@ async function onRevoke(id: string) {
     await refresh();
   } catch (err) {
     error.value = (err as Error).message;
+  }
+}
+
+async function onRotate(id: string) {
+  const token = await idToken();
+  if (!token) return;
+  rotatingId.value = id;
+  error.value = null;
+  justCreatedSecret.value = null;
+  try {
+    const rotated = await rotateKey(token, id);
+    justCreatedSecret.value = rotated.secret;
+    await refresh();
+  } catch (err) {
+    error.value = (err as Error).message;
+  } finally {
+    rotatingId.value = null;
   }
 }
 
@@ -101,7 +129,17 @@ function fmt(d: string | null) {
   </div>
   <div class="dashboard" v-else-if="authReady && user">
     <div class="new-key-card">
-      <form class="new-key-form" @submit.prevent="onCreate">
+      <button
+        v-if="!loading && liveKeyCount === 0"
+        class="first-key-btn"
+        type="button"
+        :disabled="creating"
+        @click="onCreate('default')"
+      >
+        {{ creating ? "Generating..." : "Generate your first key" }}
+      </button>
+
+      <form v-else class="new-key-form" @submit.prevent="onCreate(newKeyName)">
         <input
           v-model="newKeyName"
           type="text"
@@ -144,17 +182,18 @@ function fmt(d: string | null) {
             · last used {{ fmt(k.last_used_at) }}
           </div>
         </div>
-        <button
-          class="link-btn danger"
-          v-if="!k.revoked_at"
-          @click="onRevoke(k.id)"
-        >
-          Revoke
-        </button>
+        <div class="key-actions" v-if="!k.revoked_at">
+          <button
+            class="link-btn"
+            :disabled="rotatingId === k.id"
+            @click="onRotate(k.id)"
+          >
+            {{ rotatingId === k.id ? "Rotating..." : "Rotate" }}
+          </button>
+          <button class="link-btn danger" @click="onRevoke(k.id)">Revoke</button>
+        </div>
       </div>
     </div>
-
-    <p class="empty" v-else>No keys yet - generate one above.</p>
   </div>
   <div class="dashboard" v-else>
     <p class="loading">Loading...</p>
@@ -175,6 +214,23 @@ function fmt(d: string | null) {
   padding: 16px;
   margin-top: 20px;
   margin-bottom: 20px;
+}
+
+.first-key-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background: var(--vp-c-brand-1);
+  color: #06281c;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.first-key-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .new-key-form {
@@ -288,6 +344,13 @@ function fmt(d: string | null) {
   font-size: 12px;
 }
 
+.key-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .link-btn {
   border: none;
   background: transparent;
@@ -299,6 +362,11 @@ function fmt(d: string | null) {
   flex-shrink: 0;
 }
 
+.link-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .link-btn.danger {
   color: var(--matchday-c-delete);
 }
@@ -308,8 +376,7 @@ function fmt(d: string | null) {
   color: var(--matchday-c-delete);
 }
 
-.loading,
-.empty {
+.loading {
   color: var(--vp-c-text-3);
   font-size: 14px;
 }

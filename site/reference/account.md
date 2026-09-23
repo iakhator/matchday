@@ -3,6 +3,7 @@
 <MethodBadge method="POST" path="/api/v1/account/keys" />
 <MethodBadge method="GET" path="/api/v1/account/keys" />
 <MethodBadge method="DELETE" path="/api/v1/account/keys/{id}" />
+<MethodBadge method="POST" path="/api/v1/account/keys/{id}/rotate" />
 
 <EndpointMeta :stats="[
   { label: 'Auth', value: 'Bearer (Firebase)' },
@@ -66,7 +67,7 @@ key = httpx.post(
 
 **`secret` is returned exactly once, right here.** Every other response
 from these endpoints - including calling this one again - only ever
-returns `key_prefix`. Lose it, revoke it, generate a new one; there's no
+returns `key_prefix`. Lose it, [rotate it](#rotate-a-key); there's no
 "show it again."
 
 <ErrorCode code="422" title="Key limit reached">
@@ -110,4 +111,30 @@ The Firebase bearer token is missing, expired, or fails verification.
 <ErrorCode code="404" title="Key not found">
 Either the key doesn't exist, or it belongs to a different account - both
 look identical from the outside, on purpose.
+</ErrorCode>
+
+## Rotate a key
+
+`POST /account/keys/{id}/rotate` - revokes the old key and generates its
+replacement in one request, carrying over the name and rate limit. Same
+result as calling revoke then create yourself, just one call instead of
+two, and the new secret comes back the same way create's does.
+
+```json
+{
+  "id": "01991e40-...",
+  "name": "my-app",
+  "key_prefix": "mk_live_Z9y8X7",
+  "secret": "mk_live_Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4",
+  "requests_per_minute": 60,
+  "created_at": "2026-09-23T19:22:00Z"
+}
+```
+
+Doesn't count against your key limit - the old key stops being active in
+the same request the new one starts, so rotating never changes how many
+live keys you're holding.
+
+<ErrorCode code="404" title="Key not found">
+Same rule as revoke: doesn't exist, or isn't yours.
 </ErrorCode>

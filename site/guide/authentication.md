@@ -2,7 +2,7 @@
 
 Every request needs one header:
 
-```
+```text
 X-Gateway-Key: <your key>
 ```
 
@@ -75,10 +75,11 @@ are set from expected load, not a hard ceiling.
 
 ## Rotating a key
 
-Revoke the old one and generate a new one from your
-[dashboard](/account/dashboard) - there's no separate "rotate" action,
-because a rotation is just a revoke and a create, and doing it as two
-explicit steps means you're never holding a key you can't account for.
+Click **Rotate** next to a key on your [dashboard](/account/dashboard) -
+the old one is revoked and a replacement generated with the same name and
+limit, in one step. See the [account reference](/reference/account#rotate-a-key)
+for the underlying request if you're doing this from a script rather than
+the dashboard.
 
 ## Operating your own instance?
 

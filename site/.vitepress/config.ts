@@ -4,10 +4,28 @@ export default defineConfig({
   title: "Matchday",
   description: "Self-hosted football data, served through one stable REST API.",
 
+  head: [
+    ["link", { rel: "icon", type: "image/svg+xml", href: "/icon.svg" }],
+    ["link", { rel: "preconnect", href: "https://fonts.googleapis.com" }],
+    [
+      "link",
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "" },
+    ],
+    [
+      "link",
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap",
+      },
+    ],
+  ],
+
   themeConfig: {
-    // No logo yet - docs/assets/banner.svg is a wide banner (1200x320),
-    // not a square icon, and would look squished in the nav slot. A
-    // proper small mark is future polish, not blocking.
+    // Square crop of the ball mark from docs/assets/banner.svg (which is
+    // a 1200x320 wide banner, wrong aspect ratio for a nav slot) -
+    // see site/public/icon.svg.
+    logo: "/icon.svg",
+
     nav: [
       { text: "Guide", link: "/guide/getting-started" },
       { text: "Reference", link: "/reference/endpoints" },

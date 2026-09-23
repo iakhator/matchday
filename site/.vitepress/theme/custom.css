@@ -65,3 +65,12 @@
   opacity: 1;
   color: var(--vp-c-brand-1);
 }
+
+/* Signed-in state - class toggled by UserNavStatus.vue. themeConfig's
+   nav/sidebar (config.ts) are static build-time data with no concept of
+   "signed in", so the static "Get an API key"/"Sign up" entries are
+   always in the DOM - this just hides them once signed in, when they
+   no longer mean anything (you already have an account). */
+html.md-signed-in a[href*="/account/signup"] {
+  display: none;
+}

@@ -9,7 +9,7 @@ import {
   type ApiKeySummary,
 } from "../gatewayApi";
 
-const { user, authReady, configError, idToken, logOut } = useAuth();
+const { user, authReady, configError, idToken } = useAuth();
 const router = useRouter();
 
 const keys = ref<ApiKeySummary[]>([]);
@@ -100,13 +100,6 @@ function fmt(d: string | null) {
     </p>
   </div>
   <div class="dashboard" v-else-if="authReady && user">
-    <div class="dash-header">
-      <div>
-        <div class="dash-email">{{ user.email }}</div>
-      </div>
-      <button class="link-btn" @click="logOut">Sign out</button>
-    </div>
-
     <div class="new-key-card">
       <form class="new-key-form" @submit.prevent="onCreate">
         <input
@@ -175,23 +168,12 @@ function fmt(d: string | null) {
   padding: 24px 0;
 }
 
-.dash-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.dash-email {
-  font-size: 14px;
-  color: var(--vp-c-text-2);
-}
-
 .new-key-card {
   border-radius: 12px;
   border: 1px solid var(--matchday-c-card-border);
   background: var(--matchday-c-card-bg);
   padding: 16px;
+  margin-top: 20px;
   margin-bottom: 20px;
 }
 

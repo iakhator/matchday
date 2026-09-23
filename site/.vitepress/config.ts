@@ -76,6 +76,24 @@ export default defineConfig({
     ],
   ],
 
+  vite: {
+    server: {
+      // Without this, an occupied 5173 makes Vite silently drift to
+      // 5174/5175/... - which then no longer matches GATEWAY_CORS_ORIGINS
+      // and every /account/* API call fails with an opaque CORS error
+      // that looks nothing like "wrong port". Fail loudly instead.
+      strictPort: true,
+      headers: {
+        // The documented fix for Firebase Auth's "Cross-Origin-Opener-
+        // Policy policy would block the window.closed call" warning on
+        // signInWithPopup - without it the popup-closed poll can't check
+        // window.closed. Harmless without this (sign-in still completes),
+        // but noisy and worth silencing properly rather than ignoring.
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+      },
+    },
+  },
+
   themeConfig: {
     // Square crop of the ball mark from docs/assets/banner.svg (which is
     // a 1200x320 wide banner, wrong aspect ratio for a nav slot) -

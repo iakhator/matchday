@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Icon from "./Icon.vue";
+
 defineProps<{
   code: string;
   title: string;
@@ -9,7 +11,10 @@ defineProps<{
   <div class="error-card">
     <span class="error-code" :class="{ ok: code.startsWith('2') }">{{ code }}</span>
     <div>
-      <div class="error-title">{{ title }}</div>
+      <div class="error-title">
+        <Icon v-if="!code.startsWith('2')" name="alert" />
+        {{ title }}
+      </div>
       <p class="error-desc"><slot /></p>
     </div>
   </div>
@@ -46,8 +51,15 @@ defineProps<{
 }
 
 .error-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
   color: var(--vp-c-text-1);
+}
+
+.error-title .md-icon {
+  color: var(--matchday-c-delete);
 }
 
 .error-desc {

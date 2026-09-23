@@ -86,7 +86,7 @@ leagues = httpx.get(
 
 :::
 
-That's it - see the [endpoint reference](/reference/endpoints) for
+That's it - see the [endpoint reference](/reference/) for
 everything else available, or
 [authentication and rate limits](/guide/authentication) for what happens
 when you go over your limit.

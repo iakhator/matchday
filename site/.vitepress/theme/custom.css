@@ -44,3 +44,24 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+
+/* Sidebar/nav icons - see the ICONS map in .vitepress/config.ts for how
+   these get into the DOM (inline SVG via v-html, not a CSS trick). */
+.vp-sidebar-icon {
+  /* VitePress's base styles reset svg { display: block }, which is what
+     was dropping this to its own line above the label instead of sitting
+     inline before it - this overrides that back to inline. */
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin-right: 7px;
+  vertical-align: -3px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.VPSidebarItem.is-active .vp-sidebar-icon,
+.VPSidebarItem.has-active .vp-sidebar-icon {
+  opacity: 1;
+  color: var(--vp-c-brand-1);
+}

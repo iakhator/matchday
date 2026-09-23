@@ -3,10 +3,14 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   signOut,
   type User,
 } from "firebase/auth";
 import { getFirebaseAuth } from "../firebase";
+
+const googleProvider = new GoogleAuthProvider();
 
 // One module-level state, not one per component instance - the signup
 // page and the dashboard page are separate route loads, but both need to
@@ -32,6 +36,10 @@ function friendlyError(err: unknown): string {
       return "Password must be at least 6 characters.";
     case "auth/invalid-email":
       return "That doesn't look like a valid email address.";
+    case "auth/popup-blocked":
+      return "Your browser blocked the sign-in popup - allow popups for this site and try again.";
+    case "auth/account-exists-with-different-credential":
+      return "An account already exists with this email using a different sign-in method.";
     default:
       return (err as Error)?.message || "Something went wrong. Try again.";
   }
@@ -83,6 +91,24 @@ export function useAuth() {
     }
   }
 
+  // Same result either way as email/password - a signed-in Firebase User -
+  // so nothing downstream (the token verification on the backend, the
+  // dashboard's redirect-when-signed-in watcher) needs to know which
+  // provider was used.
+  async function signInWithGoogle(): Promise<string | null> {
+    try {
+      await signInWithPopup(getFirebaseAuth(), googleProvider);
+      return null;
+    } catch (err) {
+      // Closing the popup isn't an error worth surfacing - the user just
+      // changed their mind.
+      if ((err as { code?: string })?.code === "auth/popup-closed-by-user") {
+        return null;
+      }
+      return friendlyError(err);
+    }
+  }
+
   async function logOut(): Promise<void> {
     await signOut(getFirebaseAuth());
   }
@@ -94,5 +120,14 @@ export function useAuth() {
     return (await user.value?.getIdToken()) ?? null;
   }
 
-  return { user, authReady, configError, signIn, signUp, logOut, idToken };
+  return {
+    user,
+    authReady,
+    configError,
+    signIn,
+    signUp,
+    signInWithGoogle,
+    logOut,
+    idToken,
+  };
 }

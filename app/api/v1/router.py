@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.api.v1.routes import (
+    account,
     admin,
     fixture_stats,
     fixtures,
@@ -23,3 +24,4 @@ api_router.include_router(standings.router)
 api_router.include_router(player_stats.router)
 api_router.include_router(lookup.router)
 api_router.include_router(admin.router)
+api_router.include_router(account.router)

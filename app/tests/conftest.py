@@ -10,6 +10,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 # create_all runs - importing app.db.models alone isn't enough since some
 # modules are only pulled in lazily elsewhere (e.g. connectors).
 from app.db.models import (  # noqa: F401
+    ApiKeyRecord,
     ExternalId,
     Fixture,
     GoalEvent,
@@ -22,6 +23,7 @@ from app.db.models import (  # noqa: F401
     Standing,
     Team,
     TeamMatchStat,
+    User,
 )
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

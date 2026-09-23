@@ -31,6 +31,31 @@ class Settings(BaseSettings):
     # app polling live scores, not for bulk export.
     DEFAULT_RATE_LIMIT_PER_MINUTE: int = 120
 
+    # Identity for the self-serve dashboard (account.py) - a *different*
+    # auth plane from GATEWAY_API_KEYS/X-Gateway-Key above. Firebase
+    # answers "who is this person"; this gateway still owns the API key
+    # itself. The service account's raw JSON, not a file path, so this
+    # works unchanged on platforms without mounted files (set it from a
+    # secret manager at deploy time).
+    FIREBASE_PROJECT_ID: Optional[str] = None
+    FIREBASE_SERVICE_ACCOUNT_JSON: Optional[str] = None
+
+    # Comma-separated origins allowed to call this API from a browser (the
+    # docs site's signup/dashboard pages). Empty means no browser origin is
+    # allowed - CORS is opt-in, not defaulted open.
+    GATEWAY_CORS_ORIGINS: str = ""
+
+    # Caps how many keys one self-serve account can hold, so a compromised
+    # or careless account can only ever generate a bounded number of
+    # buckets against this gateway's own (also bounded) upstream quota.
+    MAX_API_KEYS_PER_USER: int = 5
+
+    # Default limit for a self-serve-generated key. Deliberately lower than
+    # DEFAULT_RATE_LIMIT_PER_MINUTE above (which is really an env-key
+    # default, i.e. an operator who typed the config themselves) - an
+    # unvetted signup gets a more conservative starting allowance.
+    SELF_SERVE_RATE_LIMIT_PER_MINUTE: int = 60
+
     # api-football (api-sports.io). Supplies goal events and pre-match
     # odds, which football-data.org's free tier does not carry.
     API_FOOTBALL_KEY: Optional[str] = None
@@ -61,6 +86,10 @@ class Settings(BaseSettings):
     @property
     def gateway_api_keys(self) -> List[str]:
         return [k.strip() for k in self.GATEWAY_API_KEYS.split(",") if k.strip()]
+
+    @property
+    def gateway_cors_origins(self) -> List[str]:
+        return [o.strip() for o in self.GATEWAY_CORS_ORIGINS.split(",") if o.strip()]
 
     @property
     def tracked_competitions(self) -> List[str]:

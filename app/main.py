@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -60,6 +61,18 @@ app = FastAPI(
         "headers first."
     ),
     lifespan=lifespan,
+)
+
+# Off (empty origin list) unless GATEWAY_CORS_ORIGINS is set. Only the
+# /api/v1/account/* routes need this at all - every other route is called
+# server-to-server, never from a browser - but CORS is applied per-app in
+# FastAPI, not per-router, so it is scoped here by origin instead.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.gateway_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(api_router)

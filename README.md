@@ -20,9 +20,9 @@ third-party vendor.
 - [What it does (and doesn't) solve](#what-it-does-and-doesnt-solve)
 - [Data licensing and attribution](#data-licensing-and-attribution)
 - [Architecture](#architecture)
-- [How fresh is the data?](#how-fresh-is-the-data)
 - [API versioning and stability](#api-versioning-and-stability)
 - [Authentication and rate limits](#authentication-and-rate-limits)
+- [How fresh is the data?](#how-fresh-is-the-data)
 - [Adding a connector](#adding-a-connector)
 - [Mapping ids from another provider](#mapping-ids-from-another-provider)
 - [Local development](#local-development)
@@ -67,45 +67,14 @@ already exist but serve narrower purposes - see "Backfill fallback" below
 ## Data licensing and attribution
 
 This gateway does not own any of the data it serves - it syncs it from an
-upstream provider. That provider's terms travel with the data, and they
-shape how this project can be deployed. Read this before pointing anything
-at a public instance.
+upstream provider, and that provider's terms shape how this project can be
+deployed: attribution is required, self-host with your own key (there is
+deliberately no public hosted instance of this specific deployment
+pattern), the cached data is not yours to keep once a subscription ends,
+and crests/logos are not covered by football-data.org's own terms.
 
-**Attribution is required.** Any app or site built on this gateway must
-display, in a visible place:
-
-> Data provided by football-data.org
-
-**Self-host with your own key.** Each deployment registers its own
-football-data.org key and syncs its own copy. There is deliberately no
-public hosted instance of this gateway, because re-serving a provider's
-data to third parties is a different thing from syncing it into your own
-app, and permission for the former has not been granted.
-
-**The cached data is not yours to keep.** football-data.org's terms state
-that after a subscription ends, the customer may no longer reference the
-football data obtained through their API - fixtures, results, tables,
-squad data, top scorers - on their own site or service. This gateway's
-database is a *cache*, not an archive. Losing access upstream means the
-cache has to go too.
-
-**Crests and logos are not covered.** `Team.logo` and `League.logo` hold
-URLs to club crests. Those are trademarks belonging to the clubs, not to
-the data provider, and football-data.org is explicit that you must arrange
-proof of intellectual property yourself before displaying them. Treat
-those fields as references, and clear them independently before putting a
-crest in front of users.
-
-**If you want to run a public instance,** ask first - the provider invites
-contact at `daniel@football-data.org`, and a written answer is the only
-thing that makes it safe. This note records what the published
-documentation says; it is not legal advice, and the authoritative terms
-are whatever the provider states directly.
-
-Free-tier limits worth knowing before you build on them: 10 requests per
-minute, 12 competitions, delayed scores, no player-level detail (lineups,
-cards, substitutions), and historical data restricted to the current
-season.
+Full terms, and what they mean in practice: [Data licensing and
+attribution](site/guide/licensing.md).
 
 ## Architecture
 
@@ -134,196 +103,60 @@ season.
   upstream can be swapped without their data changing underneath them; the
   `external_ids` table is where two providers' different ids for the same
   club get reconciled.
-- `app/api/v1/` - the REST API your app calls:
-  - `GET /leagues`, `GET /leagues/{id}`
-  - `GET /leagues/{id}/teams` - each team carries both `short_name` as
-    synced and a `display_name` fit to render. Upstream short names are
-    usually right ("Borussia Dortmund" -> "Dortmund") but a handful are
-    nicknames ("Atleti", "Barça"); those are corrected by a small curated
-    map in `app/core/display_names.py`. The synced value is never
-    overwritten, so you can always reconcile against the source.
-  - `GET /leagues/{id}/fixtures`, `GET /fixtures/{id}`
-  - `GET /leagues/{id}/standings`
-  - `GET /leagues/{id}/players` (season scorer stats)
-  - `GET /fixtures/{id}/player-stats`, `GET /fixtures/{id}/team-stats`,
-    `GET /fixtures/{id}/shots` (Understat data, empty unless
-    `ENABLE_SOCCERDATA=true`)
-  - `GET /fixtures/{id}/goals` - scorer, assister and minute. Check the
-    `enriched` flag before reading an empty list as a goalless match: 0-0
-    and "no data" both return nothing otherwise. Own goals are credited to
-    the team they count for, not the team of the player who scored them.
-  - `GET /fixtures/{id}/odds` - pre-match 1X2 per bookmaker, each with the
-    `captured_at` it was read. `available` distinguishes "nobody priced
-    this" from "never captured" - and since odds cannot be fetched after
-    kickoff, an empty list on a finished fixture is permanent.
-  - `GET /lookup/{entity_type}?source=...&external_id=...` - translate
-    another provider's ids into this gateway's. Takes several ids at once
-    (comma-separated, up to 500) and returns `resolved` plus an explicit
-    `unresolved` list, so a consumer can see exactly which of its entities
-    are unrecognised rather than having them silently missing.
-  - `GET /lookup/{entity_type}/{internal_id}/aliases` - the reverse: every
-    provider id known for one gateway row.
-  - `POST /admin/sync`, `POST /admin/backfill-results`,
-    `POST /admin/enrich-fixture/{id}` (manual triggers)
-
-  All gated by an `X-Gateway-Key` header - see "Authentication and rate
-  limits" below. `GET /health` and `GET /health/scheduler` are deliberately
-  ungated so an uptime monitor needs no credentials.
+- `app/api/v1/` - the REST API your app calls: leagues, teams, fixtures,
+  standings, season scorers, advanced match stats, goal events, odds,
+  cross-provider lookup, and admin triggers. Gated by an `X-Gateway-Key`
+  header - see "Authentication and rate limits" below. `GET /health` and
+  `GET /health/scheduler` are deliberately ungated so an uptime monitor
+  needs no credentials. Full endpoint-by-endpoint reference, including
+  request/response examples: [site/reference/](site/reference/).
 
 ## API versioning and stability
 
 What this API offers is a contract: code written against `/api/v1` keeps
-working. Which upstream provided the data, what the schema looks like
-underneath, which connectors are registered - all of that is deliberately
-invisible and free to change.
+working. Within a version, changes are additive only (new endpoints,
+fields, params); breaking changes ship as a new version path (`/api/v2`)
+served alongside the old one, never in place of it; anything being retired
+carries `Deprecation`/`Sunset` headers with a minimum 6 months' notice.
 
-### Within a version, changes are additive only
-
-Safe to expect, and shipped without notice:
-
-- new endpoints
-- new fields on an existing response
-- new optional query parameters
-- new enum values in a field documented as open-ended
-
-**Parse responses tolerantly.** A new field appearing is not a breaking
-change, and a client that rejects unknown fields will break on one.
-
-These are breaking, and will never happen inside `/api/v1`:
-
-- removing or renaming a field
-- changing a field's type, or making an optional one required
-- removing an endpoint, or changing what an existing one means
-- changing the meaning of an identifier
-
-### Breaking changes ship as a new version
-
-A breaking change means a new path - `/api/v2` - served **alongside**
-`/api/v1`, never replacing it in place. Nothing you have written stops
-working the day it launches.
-
-### Deprecation
-
-Anything being retired carries headers before it goes, so this is
-detectable in code rather than only in a changelog:
-
-```http
-Deprecation: true
-Sunset: Fri, 01 Jan 2027 00:00:00 GMT
-Link: </api/v1/replacement>; rel="successor-version"
-```
-
-`Sunset` is [RFC 8594](https://www.rfc-editor.org/rfc/rfc8594) and parses
-with any standard HTTP-date helper. Alert on `Deprecation` in your own
-logging and you will hear about a retirement without reading anything.
-
-**Minimum notice: 6 months** between the first deprecated response and the
-endpoint being withdrawn. A deprecated endpoint keeps working normally for
-the whole of that period - "going away" is not "already gone".
-
-Every response carries `X-API-Version`, so a captured response can be
-traced to the contract that produced it without reconstructing the request.
-
-### What is not covered
-
-The upstream data itself. If a provider corrects a score, renames a club or
-withdraws a competition, that flows through - this policy governs the shape
-of the API, not the accuracy or availability of what a third party
-publishes. See [How fresh is the data?](#how-fresh-is-the-data) for what
-can be relied on there.
+Full policy, including the exact `Deprecation`/`Sunset` header contract:
+[API versioning and stability](site/guide/versioning.md).
 
 ## Authentication and rate limits
 
-Keys are configured as `name:secret` or `name:secret:requests_per_minute`:
+Operator-configured keys are set as `name:secret` or
+`name:secret:requests_per_minute`:
 
 ```bash
 GATEWAY_API_KEYS="predify:s3cret:120,analytics:other-secret:30"
 ```
 
-Names matter once more than one app calls the gateway: without them you
-cannot tell consumers apart in the logs, revoke one without breaking the
-others, or see which one is responsible for a spike. A bare secret with no
-name still works, so configurations written before this keep running - it
-just shows as `unnamed` and gets `DEFAULT_RATE_LIMIT_PER_MINUTE`.
-
-**The gateway fails closed.** With no keys configured and no explicit
-opt-out it refuses every request with a `503` naming the setting that
-fixes it. The previous behaviour was to disable auth entirely when the key
-list was empty, which meant a deployment that simply forgot to set it
-served everything to anyone who found it, quietly. For local development,
-opt out on purpose:
+**The gateway fails closed.** With no keys configured (env or self-serve,
+see #25) and no explicit opt-out, it refuses every request with a `503`
+naming the setting that fixes it. For local development, opt out on
+purpose - `docker-compose.dev.yml` already sets this:
 
 ```bash
 GATEWAY_ALLOW_ANONYMOUS=true
 ```
 
-`docker-compose.dev.yml` already sets this, so local development is
-unaffected.
+Self-serve keys (a customer generating their own, via
+[the dashboard](site/account/dashboard.md)) are a second, separate tier -
+see [Firebase Auth for self-serve account access](https://github.com/iakhator/matchday/issues/45)
+for how that's wired.
 
-### The 429 contract
-
-Over the limit returns `429` with a `Retry-After` header in seconds, and a
-body naming the consumer and its limit:
-
-```json
-{"detail": "Rate limit exceeded for 'predify' (3 requests/minute)"}
-```
-
-The window slides rather than resetting on a boundary, so `Retry-After` is
-the time until the oldest request in the window expires - often well under
-a minute - rather than a flat 60. Waiting exactly that long is enough; a
-client that honours the header will not be refused twice for the same
-reason.
-
-Limits are counted **per key name**, so rotating a consumer's secret does
-not hand it a fresh allowance mid-minute.
-
-Two honest limitations, both from keeping this in-process rather than
-adding Redis for a single-container deployment:
-
-- limits reset when the process restarts
-- limits are per worker, so N uvicorn workers allow N times the rate
-
-Neither affects what this is for: stopping one misbehaving consumer from
-starving the others and the sync jobs, which share the process. A
-multi-replica deployment wanting exact global limits needs shared storage,
-and that is not what this is today.
+Full contract - the 429 response shape, `Retry-After` semantics, the
+per-worker rate-limiting caveat: [Authentication and rate
+limits](site/guide/authentication.md).
 
 ## How fresh is the data?
 
-Measured, not asserted. `scripts/latency_probe.py` watches this gateway's
-own API across a matchday and records when each fixture's status and score
-actually change, relative to that fixture's kickoff. Re-runnable, so the
-number below can be checked rather than trusted.
+Measured, not asserted - roughly a seven-minute delay between something
+happening and this gateway being able to see it, on football-data.org's
+free tier. Full measured numbers and what they mean for what you can build
+on this: [How fresh is the data?](site/guide/data-freshness.md).
 
-Measured on 12 September 2026, free tier, Premier League + La Liga +
-Bundesliga:
-
-| | |
-| --- | --- |
-| Kickoff -> status becomes `live` | **7-10 minutes** (10 fixtures) |
-| Goal scored -> new score visible | **7-8 minutes** (5 fixtures) |
-
-The two agree, which is the useful part: both point at a roughly
-seven-minute delay between something happening and this gateway being able
-to see it.
-
-**That delay is upstream, not here.** The live-score job polls every 60
-seconds, so the gateway can add at most about a minute of its own.
-football-data.org's free tier advertises *delayed scores*, and this is what
-that means in practice.
-
-Worth knowing before building on it: a seven-minute lag is fine for
-standings, schedules and post-match results. It is not fine for anything
-that needs to react as a match unfolds - live odds, in-play notifications,
-a second-screen experience. Those need a paid tier or a different upstream,
-and no amount of polling here will fix it.
-
-Sample sizes are small and from a single matchday, so treat the figures as
-an order of magnitude rather than an SLA. The goal-latency correlation
-matches score changes to goal minutes heuristically; one further
-observation did not correlate cleanly and was excluded rather than
-averaged in.
+Re-measure it on your own deployment with `scripts/latency_probe.py`:
 
 ```bash
 python scripts/latency_probe.py --until 22:00   # capture a matchday
@@ -331,11 +164,9 @@ python scripts/latency_probe.py --report        # summarise the log
 ```
 
 The probe asks the gateway which competitions exist rather than holding a
-list of its own. An earlier version hardcoded the upstream provider's
-competition ids; when the gateway moved to ids of its own, every request
-404'd and the probe carried on for seven hours recording nothing. It now
-discovers competitions at startup and aborts if fetches keep failing,
-because a log file full of errors looks like data until you read it.
+list of its own - an earlier version hardcoded the upstream provider's
+competition ids, and when the gateway moved to ids of its own, every
+request 404'd and the probe carried on for seven hours recording nothing.
 
 ## Adding a connector
 
@@ -439,6 +270,21 @@ normalization (status mapping, standings table selection, field
 fallbacks), sync upsert/idempotency and unknown-team-ref skipping, the
 connector fallback chain, the Sofascore team-name slug matching, API-key
 auth, and the scheduler heartbeat logic itself.
+
+### Docs site
+
+```bash
+cd site
+npm install
+npm run dev
+```
+
+The public-facing docs (getting started, endpoint reference, auth/
+versioning/licensing policy, and the self-serve signup/dashboard pages) -
+a separate VitePress project, not part of the Python app. See
+`site/.env.example` for the Firebase config the signup/dashboard pages
+need to actually authenticate anyone; without it they render a clear
+"not configured" message instead of hanging.
 
 ## Deploying
 

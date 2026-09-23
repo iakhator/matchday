@@ -11,3 +11,8 @@ logs/
 .DS_Store
 uv.lock.bak
 downloaded_files/
+
+# site/ (VitePress docs)
+site/node_modules/
+site/.vitepress/dist/
+site/.vitepress/cache/

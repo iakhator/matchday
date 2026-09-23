@@ -14,7 +14,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: API reference
-      link: /reference/endpoints
+      link: /reference/
 
 features:
   - title: One stable contract

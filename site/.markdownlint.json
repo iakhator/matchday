@@ -6,6 +6,9 @@
       "ParamCard",
       "ErrorCode",
       "ClientOnly",
+      "AuthPanel",
+      "Dashboard",
+      "script",
       "code"
     ]
   },

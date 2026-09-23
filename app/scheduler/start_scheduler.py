@@ -15,7 +15,20 @@ from app.scheduler.jobs import (
 )
 from app.utils.datetime_utils import utcnow
 
-scheduler = AsyncIOScheduler()
+# Defaults matter here: AsyncIOScheduler's built-in default
+# misfire_grace_time is ~1 second. Every job runs on the same event loop
+# as the web server, so anything that keeps the loop briefly busy around a
+# job's fire time (a slow request, a connector's retry/backoff sleep, a
+# neighboring job still finishing up) pushes it past that ~1s window -
+# and the default behavior is to silently skip the run rather than run it
+# late. Once a job misses one slot it's often still busy for the next,
+# so it can stay stuck skipping for hours. misfire_grace_time=None means
+# "run it whenever discovered, no matter how late"; coalesce=True means a
+# job that missed several slots in a row still only runs once (catch up,
+# don't backlog-replay).
+scheduler = AsyncIOScheduler(
+    job_defaults={"coalesce": True, "misfire_grace_time": None}
+)
 
 
 def start_scheduler() -> None:

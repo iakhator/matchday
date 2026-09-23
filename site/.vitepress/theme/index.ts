@@ -7,6 +7,8 @@ import MethodBadge from "./components/MethodBadge.vue";
 import EndpointMeta from "./components/EndpointMeta.vue";
 import ParamCard from "./components/ParamCard.vue";
 import ErrorCode from "./components/ErrorCode.vue";
+import AuthPanel from "./components/AuthPanel.vue";
+import Dashboard from "./components/Dashboard.vue";
 
 // Extended (not replaced) so the signup/dashboard pages - see
 // site/account/*.md - can drop in interactive Vue components alongside
@@ -24,5 +26,7 @@ export default {
     app.component("EndpointMeta", EndpointMeta);
     app.component("ParamCard", ParamCard);
     app.component("ErrorCode", ErrorCode);
+    app.component("AuthPanel", AuthPanel);
+    app.component("Dashboard", Dashboard);
   },
 } satisfies Theme;

@@ -31,7 +31,10 @@ const copied = ref(false);
 // explicit click either way - see the commit message for why this isn't
 // auto-created on page load instead (a page render having a side effect
 // is the wrong shape, even for a "default" key).
-const liveKeyCount = computed(() => keys.value.filter((k) => !k.revoked_at).length);
+//
+// Every key the API returns is live - a revoked key's row is deleted, not
+// flagged (see ApiKeyRecord's docstring) - so this is just the count.
+const liveKeyCount = computed(() => keys.value.length);
 
 watch(
   [user, authReady],
@@ -172,17 +175,14 @@ function fmt(d: string | null) {
     <div class="key-list" v-else-if="keys.length">
       <div class="key-row" v-for="k in keys" :key="k.id">
         <div class="key-info">
-          <div class="key-name">
-            {{ k.name }}
-            <span class="key-revoked" v-if="k.revoked_at">revoked</span>
-          </div>
+          <div class="key-name">{{ k.name }}</div>
           <div class="key-meta">
             <code>{{ k.key_prefix }}...</code>
             · {{ k.requests_per_minute }} req/min
             · last used {{ fmt(k.last_used_at) }}
           </div>
         </div>
-        <div class="key-actions" v-if="!k.revoked_at">
+        <div class="key-actions">
           <button
             class="link-btn"
             :disabled="rotatingId === k.id"
@@ -322,14 +322,6 @@ function fmt(d: string | null) {
 .key-name {
   font-weight: 600;
   font-size: 14px;
-}
-
-.key-revoked {
-  margin-left: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--matchday-c-delete);
 }
 
 .key-meta {

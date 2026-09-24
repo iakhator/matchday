@@ -86,22 +86,20 @@ generating another.
       "key_prefix": "mk_live_A1b2C3",
       "requests_per_minute": 60,
       "created_at": "2026-09-23T18:04:00Z",
-      "last_used_at": "2026-09-23T18:10:22Z",
-      "revoked_at": null
+      "last_used_at": "2026-09-23T18:10:22Z"
     }
   ],
   "total": 1
 }
 ```
 
-Revoked keys stay in this list (with `revoked_at` set) rather than
-disappearing - so you can still see what a key was called and when it
-stopped working.
+Only ever your live keys - revoking one deletes its row, so it simply
+stops appearing here rather than lingering with a revoked flag set.
 
 ## Revoke a key
 
-`DELETE /account/keys/{id}`. Revocation is permanent - a timestamp, not
-reversible, and scoped to your own account: you can't revoke a key that
+`DELETE /account/keys/{id}`. Deletes the key outright - permanent, not
+reversible - and scoped to your own account: you can't revoke a key that
 isn't yours, even if you guess its id correctly.
 
 <ErrorCode code="401" title="Missing or invalid sign-in token">

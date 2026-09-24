@@ -153,7 +153,6 @@ async def find_db_key(
         await session.exec(
             select(ApiKeyRecord).where(
                 ApiKeyRecord.hashed_secret == hash_secret(presented),
-                ApiKeyRecord.revoked_at.is_(None),
             )
         )
     ).first()
@@ -179,7 +178,5 @@ async def has_any_db_keys(session: AsyncSession) -> bool:
     gateway with no env keys configured but real self-serve customers must
     not refuse them just because the env var was never set.
     """
-    result = await session.exec(
-        select(ApiKeyRecord.id).where(ApiKeyRecord.revoked_at.is_(None)).limit(1)
-    )
+    result = await session.exec(select(ApiKeyRecord.id).limit(1))
     return result.first() is not None

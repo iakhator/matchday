@@ -16,19 +16,17 @@ from app.schemas.api_key import (
     ApiKeyListResponse,
     ApiKeyOut,
 )
-from app.utils.datetime_utils import utcnow
 
 router = APIRouter(prefix="/account", tags=["account"])
 
 
 async def _owned_live_keys(session: AsyncSession, user: User) -> list[ApiKeyRecord]:
+    """Every key this account owns. All of them are live - a revoked key's
+    row is deleted, not flagged, so a row existing at all means it works."""
     return list(
         (
             await session.exec(
-                select(ApiKeyRecord).where(
-                    ApiKeyRecord.owner_user_id == user.id,
-                    ApiKeyRecord.revoked_at.is_(None),
-                )
+                select(ApiKeyRecord).where(ApiKeyRecord.owner_user_id == user.id)
             )
         ).all()
     )
@@ -80,8 +78,9 @@ async def list_keys(
     user: User = Depends(require_firebase_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Every key this account has ever generated, revoked or not - the
-    secret itself is never included, only `key_prefix`."""
+    """Every key this account currently owns - a revoked key's row is
+    deleted, so nothing but live keys ever appears here. The secret itself
+    is never included, only `key_prefix`."""
     rows = (
         await session.exec(
             select(ApiKeyRecord)
@@ -99,9 +98,9 @@ async def revoke_key(
     user: User = Depends(require_firebase_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Revocation is a timestamp, not a delete - see ApiKeyRecord's
-    docstring for why. Scoped to owner_user_id so one account can never
-    revoke another's key, including by guessing an id."""
+    """Revocation deletes the row - see ApiKeyRecord's docstring for why.
+    Scoped to owner_user_id so one account can never revoke another's key,
+    including by guessing an id."""
     record = (
         await session.exec(
             select(ApiKeyRecord).where(
@@ -112,10 +111,59 @@ async def revoke_key(
     if record is None:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    if record.revoked_at is None:
-        record.revoked_at = utcnow()
-        session.add(record)
-        await session.commit()
-        await session.refresh(record)
+    # Read the response out before deleting - the ORM instance can't be
+    # refreshed from a row that no longer exists.
+    result = ApiKeyOut.model_validate(record)
+    await session.delete(record)
+    await session.commit()
 
-    return record
+    return result
+
+
+@router.post("/keys/{key_id}/rotate", response_model=ApiKeyCreatedOut)
+async def rotate_key(
+    key_id: uuid.UUID,
+    user: User = Depends(require_firebase_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Revoke the old key and generate its replacement in one request,
+    carrying over its name and rate limit. Same safety property as
+    create_key - the plaintext is shown exactly once, here - just without
+    making the caller do it as two separate manual steps.
+
+    Doesn't touch MAX_API_KEYS_PER_USER: the old key stops counting as
+    live in the same commit the new one starts counting, so the live
+    count this account holds never changes because of a rotation.
+    """
+    old = (
+        await session.exec(
+            select(ApiKeyRecord).where(
+                ApiKeyRecord.id == key_id, ApiKeyRecord.owner_user_id == user.id
+            )
+        )
+    ).first()
+    if old is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    await session.delete(old)
+
+    plaintext, prefix, hashed = generate_secret()
+    new_record = ApiKeyRecord(
+        owner_user_id=user.id,
+        name=old.name,
+        key_prefix=prefix,
+        hashed_secret=hashed,
+        requests_per_minute=old.requests_per_minute,
+    )
+    session.add(new_record)
+    await session.commit()
+    await session.refresh(new_record)
+
+    return ApiKeyCreatedOut(
+        id=new_record.id,
+        name=new_record.name,
+        key_prefix=new_record.key_prefix,
+        secret=plaintext,
+        requests_per_minute=new_record.requests_per_minute,
+        created_at=new_record.created_at,
+    )

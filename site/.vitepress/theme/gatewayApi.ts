@@ -67,3 +67,9 @@ export async function createKey(token: string, name: string): Promise<ApiKeyCrea
 export async function revokeKey(token: string, id: string): Promise<void> {
   await request<ApiKeySummary>(`/account/keys/${id}`, token, { method: "DELETE" });
 }
+
+export async function rotateKey(token: string, id: string): Promise<ApiKeyCreated> {
+  return request<ApiKeyCreated>(`/account/keys/${id}/rotate`, token, {
+    method: "POST",
+  });
+}

@@ -108,14 +108,13 @@ class TestListKeys:
         assert "secret" not in body["items"][0]
         assert body["items"][0]["key_prefix"].startswith("mk_live_")
 
-    async def test_revoked_keys_still_appear_with_their_revoked_at_set(self, client):
+    async def test_revoked_keys_no_longer_appear(self, client):
         created = await client.post("/api/v1/account/keys", json={"name": "my-app"})
         key_id = created.json()["id"]
         await client.delete(f"/api/v1/account/keys/{key_id}")
 
         r = await client.get("/api/v1/account/keys")
-        [item] = r.json()["items"]
-        assert item["revoked_at"] is not None
+        assert r.json() == {"items": [], "total": 0}
 
     async def test_empty_for_an_account_with_no_keys(self, client):
         r = await client.get("/api/v1/account/keys")
@@ -162,6 +161,78 @@ class TestRevokeKey:
             transport=ASGITransport(app=app), base_url="http://test"
         ) as other_client:
             r = await other_client.delete(f"/api/v1/account/keys/{key_id}")
+
+        assert r.status_code == 404
+
+
+class TestRotateKey:
+    async def test_old_key_stops_working_new_one_starts(self, client, test_session):
+        from app.core.api_keys import find_db_key
+
+        created = await client.post("/api/v1/account/keys", json={"name": "my-app"})
+        key_id, old_plaintext = created.json()["id"], created.json()["secret"]
+
+        rotated = await client.post(f"/api/v1/account/keys/{key_id}/rotate")
+        assert rotated.status_code == 200
+        new_plaintext = rotated.json()["secret"]
+
+        assert new_plaintext != old_plaintext
+        assert await find_db_key(test_session, old_plaintext) is None
+        assert (await find_db_key(test_session, new_plaintext)) is not None
+
+    async def test_carries_over_name_and_rate_limit(self, client):
+        created = await client.post("/api/v1/account/keys", json={"name": "my-app"})
+        key_id = created.json()["id"]
+
+        rotated = await client.post(f"/api/v1/account/keys/{key_id}/rotate")
+        assert rotated.json()["name"] == "my-app"
+        assert (
+            rotated.json()["requests_per_minute"] == created.json()["requests_per_minute"]
+        )
+
+    async def test_does_not_count_twice_against_the_cap(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "MAX_API_KEYS_PER_USER", 1)
+
+        created = await client.post("/api/v1/account/keys", json={"name": "my-app"})
+        key_id = created.json()["id"]
+
+        # At the cap already (1/1 live). Rotating must still work - the
+        # old key stops being live in the same commit the new one starts.
+        rotated = await client.post(f"/api/v1/account/keys/{key_id}/rotate")
+        assert rotated.status_code == 200
+
+        listed = await client.get("/api/v1/account/keys")
+        assert len(listed.json()["items"]) == 1
+
+    async def test_unknown_key_id_is_404(self, client):
+        r = await client.post(
+            "/api/v1/account/keys/00000000-0000-0000-0000-000000000000/rotate"
+        )
+        assert r.status_code == 404
+
+    async def test_one_account_cannot_rotate_another_accounts_key(
+        self, test_session, owner
+    ):
+        other_user = await _make_user(test_session, email="other-rotate@example.com")
+
+        app = FastAPI()
+        app.include_router(api_router)
+        app.dependency_overrides[get_session] = lambda: test_session
+        app.dependency_overrides[require_firebase_user] = lambda: owner
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as owner_client:
+            created = await owner_client.post(
+                "/api/v1/account/keys", json={"name": "owners-key"}
+            )
+        key_id = created.json()["id"]
+
+        app.dependency_overrides[require_firebase_user] = lambda: other_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as other_client:
+            r = await other_client.post(f"/api/v1/account/keys/{key_id}/rotate")
 
         assert r.status_code == 404
 

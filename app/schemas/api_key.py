@@ -30,7 +30,6 @@ class ApiKeyOut(BaseModel):
     requests_per_minute: int
     created_at: Optional[datetime]
     last_used_at: Optional[datetime]
-    revoked_at: Optional[datetime]
 
     model_config = ConfigDict(from_attributes=True)
 

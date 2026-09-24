@@ -18,10 +18,13 @@ class ApiKeyRecord(SQLModel, table=True):
     tell their keys apart without being able to reconstruct the secret from
     it.
 
-    Revocation is a timestamp, not a delete - keeping the row lets
-    `last_used_at` survive revoking a key, and means a revoked key's
-    identity can never be reissued the way reusing a deleted row's slot
-    could.
+    Revocation deletes the row. An earlier version soft-deleted (a
+    `revoked_at` timestamp, row kept for its `last_used_at` history) -
+    dropped in favor of an actually self-healing table: a self-serve
+    account revoking and regenerating keys repeatedly should not leave a
+    permanently growing pile of dead rows behind, and a dashboard
+    listing keys the owner can no longer do anything about (not usable,
+    not un-revocable) was clutter, not an audit trail worth the cost.
     """
 
     __tablename__: str = "api_keys"
@@ -38,8 +41,5 @@ class ApiKeyRecord(SQLModel, table=True):
         default_factory=utcnow, sa_column=sa.Column(sa.DateTime(timezone=True))
     )
     last_used_at: Optional[datetime] = Field(
-        default=None, sa_column=sa.Column(sa.DateTime(timezone=True))
-    )
-    revoked_at: Optional[datetime] = Field(
         default=None, sa_column=sa.Column(sa.DateTime(timezone=True))
     )

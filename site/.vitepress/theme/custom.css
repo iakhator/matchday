@@ -66,20 +66,31 @@
   color: var(--vp-c-brand-1);
 }
 
-/* Signed-in state - class toggled by UserNavStatus.vue. themeConfig's
+/* Signed-in state - classes toggled by UserNavStatus.vue. themeConfig's
    nav/sidebar (config.ts) are static build-time data with no concept of
    "signed in", so the static "Get an API key"/"Sign up"/"Dashboard"
-   entries are always in the DOM - this hides each once it no longer
-   means anything: Sign up once you already have an account, Dashboard
-   until you do (it just bounces you to Sign up anyway - see Dashboard
-   .vue's redirect - so there's nothing to click through to yet).
-   Defaults closed (Dashboard hidden) until JS confirms otherwise, on
-   the same fail-safe assumption require_api_key uses server-side:
-   assume signed out until proven signed in, never the other way. */
-html.md-signed-in a[href*="/account/signup"] {
+   entries are always in the DOM - these rules hide each once it no
+   longer means anything: Sign up once you already have an account,
+   Dashboard until you do (it just bounces you to Sign up anyway - see
+   Dashboard.vue's redirect - so there's nothing to click through to
+   yet).
+
+   Hidden by default until md-auth-ready, not just switched between the
+   two states directly: without this, every page load starts assuming
+   signed-out (Sign up visible), and someone who actually is signed in
+   sees it flash before snapping to the signed-in state once Firebase's
+   local session check resolves - a visible flicker on every refresh.
+   Waiting for md-auth-ready means the correct one appears once, instead
+   of the wrong one appearing and then being corrected. */
+html:not(.md-auth-ready) a[href*="/account/signup"],
+html:not(.md-auth-ready) a[href*="/account/dashboard"] {
   display: none;
 }
 
-html:not(.md-signed-in) a[href*="/account/dashboard"] {
+html.md-auth-ready.md-signed-in a[href*="/account/signup"] {
+  display: none;
+}
+
+html.md-auth-ready:not(.md-signed-in) a[href*="/account/dashboard"] {
   display: none;
 }

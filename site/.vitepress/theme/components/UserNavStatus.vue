@@ -11,6 +11,15 @@ const { user, authReady, logOut } = useAuth();
 // config with no way to make individual entries conditional on runtime
 // auth state.
 //
+// Two classes, not one: `md-auth-ready` marks "Firebase has answered",
+// separately from `md-signed-in`. Without that split, every page load
+// starts in the not-signed-in default (Sign up visible) and then, for
+// someone who actually is signed in, snaps to the signed-in state once
+// onAuthStateChanged resolves - a visible flash of the wrong nav state
+// on every single refresh. custom.css hides *both* Sign up and
+// Dashboard until md-auth-ready is set, so the correct one appears once
+// instead of the wrong one appearing then being corrected.
+//
 // Registered inside onMounted, not as an immediate watcher: VitePress
 // renders every page server-side at build time (Node has no `document`),
 // and this component - unlike AuthPanel/Dashboard - isn't wrapped in
@@ -20,6 +29,7 @@ onMounted(() => {
   watch(
     [user, authReady],
     ([u, ready]) => {
+      document.documentElement.classList.toggle("md-auth-ready", !!ready);
       document.documentElement.classList.toggle("md-signed-in", !!(ready && u));
     },
     { immediate: true },

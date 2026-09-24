@@ -16,19 +16,17 @@ from app.schemas.api_key import (
     ApiKeyListResponse,
     ApiKeyOut,
 )
-from app.utils.datetime_utils import utcnow
 
 router = APIRouter(prefix="/account", tags=["account"])
 
 
 async def _owned_live_keys(session: AsyncSession, user: User) -> list[ApiKeyRecord]:
+    """Every key this account owns. All of them are live - a revoked key's
+    row is deleted, not flagged, so a row existing at all means it works."""
     return list(
         (
             await session.exec(
-                select(ApiKeyRecord).where(
-                    ApiKeyRecord.owner_user_id == user.id,
-                    ApiKeyRecord.revoked_at.is_(None),
-                )
+                select(ApiKeyRecord).where(ApiKeyRecord.owner_user_id == user.id)
             )
         ).all()
     )
@@ -80,8 +78,9 @@ async def list_keys(
     user: User = Depends(require_firebase_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Every key this account has ever generated, revoked or not - the
-    secret itself is never included, only `key_prefix`."""
+    """Every key this account currently owns - a revoked key's row is
+    deleted, so nothing but live keys ever appears here. The secret itself
+    is never included, only `key_prefix`."""
     rows = (
         await session.exec(
             select(ApiKeyRecord)
@@ -99,9 +98,9 @@ async def revoke_key(
     user: User = Depends(require_firebase_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Revocation is a timestamp, not a delete - see ApiKeyRecord's
-    docstring for why. Scoped to owner_user_id so one account can never
-    revoke another's key, including by guessing an id."""
+    """Revocation deletes the row - see ApiKeyRecord's docstring for why.
+    Scoped to owner_user_id so one account can never revoke another's key,
+    including by guessing an id."""
     record = (
         await session.exec(
             select(ApiKeyRecord).where(
@@ -112,13 +111,13 @@ async def revoke_key(
     if record is None:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    if record.revoked_at is None:
-        record.revoked_at = utcnow()
-        session.add(record)
-        await session.commit()
-        await session.refresh(record)
+    # Read the response out before deleting - the ORM instance can't be
+    # refreshed from a row that no longer exists.
+    result = ApiKeyOut.model_validate(record)
+    await session.delete(record)
+    await session.commit()
 
-    return record
+    return result
 
 
 @router.post("/keys/{key_id}/rotate", response_model=ApiKeyCreatedOut)
@@ -146,9 +145,7 @@ async def rotate_key(
     if old is None:
         raise HTTPException(status_code=404, detail="API key not found")
 
-    if old.revoked_at is None:
-        old.revoked_at = utcnow()
-        session.add(old)
+    await session.delete(old)
 
     plaintext, prefix, hashed = generate_secret()
     new_record = ApiKeyRecord(

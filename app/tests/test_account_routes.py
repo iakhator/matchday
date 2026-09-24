@@ -108,14 +108,13 @@ class TestListKeys:
         assert "secret" not in body["items"][0]
         assert body["items"][0]["key_prefix"].startswith("mk_live_")
 
-    async def test_revoked_keys_still_appear_with_their_revoked_at_set(self, client):
+    async def test_revoked_keys_no_longer_appear(self, client):
         created = await client.post("/api/v1/account/keys", json={"name": "my-app"})
         key_id = created.json()["id"]
         await client.delete(f"/api/v1/account/keys/{key_id}")
 
         r = await client.get("/api/v1/account/keys")
-        [item] = r.json()["items"]
-        assert item["revoked_at"] is not None
+        assert r.json() == {"items": [], "total": 0}
 
     async def test_empty_for_an_account_with_no_keys(self, client):
         r = await client.get("/api/v1/account/keys")
@@ -203,8 +202,7 @@ class TestRotateKey:
         assert rotated.status_code == 200
 
         listed = await client.get("/api/v1/account/keys")
-        live = [k for k in listed.json()["items"] if k["revoked_at"] is None]
-        assert len(live) == 1
+        assert len(listed.json()["items"]) == 1
 
     async def test_unknown_key_id_is_404(self, client):
         r = await client.post(

@@ -152,24 +152,19 @@ class TestSelfServeKeys:
         assert result.name == "predify"
 
     async def test_revoked_self_serve_key_is_rejected(self, monkeypatch, test_session):
+        """A revoked key's row is deleted, not flagged - so this exercises
+        the same "no matching row" path as a key that never existed."""
         monkeypatch.setattr(settings, "GATEWAY_API_KEYS", "admin:admin-secret")
-        plaintext, _, hashed = generate_secret()
-        user = User(firebase_uid="uid-revoked", email="revoked@example.com")
-        test_session.add(user)
-        await test_session.commit()
-        await test_session.refresh(user)
+        plaintext = await _create_user_and_key(test_session, name="revoked")
 
-        from app.utils.datetime_utils import utcnow
+        from sqlmodel import select
 
-        record = ApiKeyRecord(
-            owner_user_id=user.id,
-            name="revoked",
-            key_prefix=plaintext[:14],
-            hashed_secret=hashed,
-            requests_per_minute=60,
-            revoked_at=utcnow(),
-        )
-        test_session.add(record)
+        record = (
+            await test_session.exec(
+                select(ApiKeyRecord).where(ApiKeyRecord.name == "revoked")
+            )
+        ).first()
+        await test_session.delete(record)
         await test_session.commit()
 
         with pytest.raises(HTTPException) as exc_info:

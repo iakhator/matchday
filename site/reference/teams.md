@@ -73,3 +73,53 @@ labels ("Atleti", "Barça"), and those are corrected by a small curated map.
 The league itself doesn't exist - not to be confused with an empty
 result, which just means no roster has synced yet.
 </ErrorCode>
+
+## Get a single team
+
+<MethodBadge method="GET" path="/api/v1/teams/{id}" />
+
+Direct lookup by the id this gateway already hands out - in fixtures,
+standings, lookup responses - without needing to know which league a team
+belongs to first.
+
+::: code-group
+
+```bash [curl]
+curl https://api.matchday.example/api/v1/teams/57 \
+  -H "X-Gateway-Key: $MATCHDAY_KEY"
+```
+
+```js [JavaScript]
+const team = await fetch("https://api.matchday.example/api/v1/teams/57", {
+  headers: { "X-Gateway-Key": process.env.MATCHDAY_KEY },
+}).then((r) => r.json());
+```
+
+```python [Python]
+team = httpx.get(
+    "https://api.matchday.example/api/v1/teams/57",
+    headers={"X-Gateway-Key": os.environ["MATCHDAY_KEY"]},
+).json()
+```
+
+:::
+
+### Single-team response
+
+```json
+{
+  "id": 57,
+  "league_id": 2021,
+  "season_year": 2026,
+  "name": "Arsenal FC",
+  "short_name": "Arsenal",
+  "display_name": "Arsenal",
+  "code": "ARS",
+  "logo": "https://crests.football-data.org/57.png",
+  "venue": "Emirates Stadium"
+}
+```
+
+<ErrorCode code="404" title="No team with that id">
+No club has ever synced under this id.
+</ErrorCode>

@@ -10,10 +10,10 @@ from app.db.database import get_session
 from app.db.models import League, Team
 from app.schemas.team import TeamOut
 
-router = APIRouter(prefix="/leagues/{league_id}/teams", tags=["teams"])
+router = APIRouter(tags=["teams"])
 
 
-@router.get("", response_model=List[TeamOut])
+@router.get("/leagues/{league_id}/teams", response_model=List[TeamOut])
 async def list_teams(
     league_id: int,
     session: AsyncSession = Depends(get_session),
@@ -31,3 +31,18 @@ async def list_teams(
         await session.exec(select(Team).where(Team.league_id == league.id))
     ).all()
     return teams
+
+
+@router.get("/teams/{team_id}", response_model=TeamOut)
+async def get_team(
+    team_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: ApiKey = Depends(require_api_key),
+):
+    """Direct lookup by the id this gateway already hands out - in
+    fixtures, standings and lookup responses - without needing to know
+    which league the team belongs to first."""
+    team = await session.get(Team, team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team

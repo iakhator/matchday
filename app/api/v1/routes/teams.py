@@ -31,3 +31,21 @@ async def list_teams(
         await session.exec(select(Team).where(Team.league_id == league.id))
     ).all()
     return teams
+
+
+team_detail_router = APIRouter(prefix="/teams", tags=["teams"])
+
+
+@team_detail_router.get("/{team_id}", response_model=TeamOut)
+async def get_team(
+    team_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: ApiKey = Depends(require_api_key),
+):
+    """Direct lookup by the id this gateway already hands out - in
+    fixtures, standings and lookup responses - without needing to know
+    which league the team belongs to first."""
+    team = await session.get(Team, team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    return team

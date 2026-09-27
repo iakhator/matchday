@@ -18,6 +18,7 @@ from app.core.versioning import add_version_header
 api_router = APIRouter(prefix="/api/v1", dependencies=[Depends(add_version_header)])
 api_router.include_router(leagues.router)
 api_router.include_router(teams.router)
+api_router.include_router(teams.team_detail_router)
 api_router.include_router(fixtures.router)
 api_router.include_router(fixture_stats.router)
 api_router.include_router(standings.router)

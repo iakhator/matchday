@@ -2,6 +2,7 @@
 
 <MethodBadge method="GET" path="/api/v1/leagues/{id}/fixtures" />
 <MethodBadge method="GET" path="/api/v1/fixtures/{id}" />
+<MethodBadge method="GET" path="/api/v1/teams/{id}/fixtures" />
 
 <EndpointMeta :stats="[
   { label: 'Auth', value: 'X-Gateway-Key' },
@@ -12,14 +13,16 @@ The schedule and scores for a league's season - including postponements,
 reschedules and results, all as status changes on the same fixture row
 rather than separate events to reconcile.
 
-## Query parameters (list only)
+## Query parameters (list endpoints only)
 
 <ParamCard name="season" type="integer">
-Defaults to the league's current season.
+Defaults to the league's current season on `/leagues/{id}/fixtures`, or the
+team's current league's current season on `/teams/{id}/fixtures`.
 </ParamCard>
 
 <ParamCard name="matchday" type="integer">
-Filter to a single matchday/gameweek.
+Filter to a single matchday/gameweek. `/leagues/{id}/fixtures` only - a
+team's fixtures aren't scoped to one competition's matchday numbering.
 </ParamCard>
 
 <ParamCard
@@ -27,7 +30,7 @@ Filter to a single matchday/gameweek.
   type="string (enum)"
   :enum-values="['scheduled', 'live', 'finished', 'postponed', 'suspended', 'cancelled']"
 >
-Filter fixtures by their current status.
+Filter fixtures by their current status. Supported on both list endpoints.
 </ParamCard>
 
 ## Request
@@ -58,8 +61,11 @@ fixtures = httpx.get(
 
 ## Response
 
-`GET /leagues/{id}/fixtures` returns `{ items, total }`. `GET /fixtures/{id}`
-returns one `item` object directly.
+`GET /leagues/{id}/fixtures` and `GET /teams/{id}/fixtures` both return
+`{ items, total }`, in the same shape - `/teams/{id}/fixtures` returns every
+fixture where the team played home or away, across whichever league it was
+in at the time, ordered by kickoff. `GET /fixtures/{id}` returns one `item`
+object directly.
 
 ```json
 {
@@ -90,7 +96,8 @@ against upstream, not when the match happened - see
 [How fresh is the data?](/guide/data-freshness) for what that lag
 actually looks like in practice.
 
-<ErrorCode code="404" title="No league or fixture with that id">
-Both endpoints 404 the same way - an unknown league id on the list
-endpoint, or an unknown fixture id on the single-fixture one.
+<ErrorCode code="404" title="No league, team or fixture with that id">
+All three endpoints 404 the same way - an unknown league or team id on
+their respective list endpoints, or an unknown fixture id on the
+single-fixture one.
 </ErrorCode>

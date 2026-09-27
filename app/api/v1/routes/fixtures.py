@@ -2,13 +2,14 @@ from datetime import date, datetime, time, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
+from app.core.pagination import Pagination, pagination_params
 from app.db.database import get_session
 from app.db.models import Fixture, League, Team
 from app.schemas.fixture import FixtureListResponse, FixtureOut
@@ -38,6 +39,15 @@ def _to_fixture_out(fixture: Fixture, home_team: Team, away_team: Team) -> Fixtu
     )
 
 
+async def _count_fixtures(session: AsyncSession, *conditions) -> int:
+    """Total matching rows, independent of the page window - `total` must
+    reflect every fixture the filters match, not just the ones returned."""
+    result = await session.exec(
+        select(func.count()).select_from(Fixture).where(*conditions)
+    )
+    return result.one()
+
+
 @router.get("/leagues/{league_id}/fixtures", response_model=FixtureListResponse)
 async def list_fixtures(
     league_id: int,
@@ -49,6 +59,7 @@ async def list_fixtures(
         None,
         description="scheduled | live | finished | postponed | suspended | cancelled",
     ),
+    page: Pagination = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
     _: ApiKey = Depends(require_api_key),
 ):
@@ -60,6 +71,14 @@ async def list_fixtures(
     if not season_year:
         return FixtureListResponse(items=[], total=0)
 
+    conditions = [Fixture.league_id == league.id, Fixture.season_year == season_year]
+    if matchday is not None:
+        conditions.append(Fixture.matchday == matchday)
+    if status is not None:
+        conditions.append(Fixture.status == status)
+
+    total = await _count_fixtures(session, *conditions)
+
     HomeTeam = aliased(Team, name="home_team")
     AwayTeam = aliased(Team, name="away_team")
 
@@ -67,23 +86,16 @@ async def list_fixtures(
         select(Fixture, HomeTeam, AwayTeam)
         .join(HomeTeam, HomeTeam.id == Fixture.home_team_id)
         .join(AwayTeam, AwayTeam.id == Fixture.away_team_id)
-        .where(
-            Fixture.league_id == league.id,
-            Fixture.season_year == season_year,
-        )
+        .where(*conditions)
         .order_by(Fixture.kickoff_at)
+        .offset(page.offset)
+        .limit(page.limit)
     )
-
-    if matchday is not None:
-        query = query.where(Fixture.matchday == matchday)
-    if status is not None:
-        query = query.where(Fixture.status == status)
-
     rows = (await session.exec(query)).all()
 
     items = [_to_fixture_out(fixture, home, away) for fixture, home, away in rows]
 
-    return FixtureListResponse(items=items, total=len(items))
+    return FixtureListResponse(items=items, total=total)
 
 
 @router.get("/fixtures", response_model=FixtureListResponse)
@@ -94,6 +106,7 @@ async def list_all_fixtures(
         None,
         description="scheduled | live | finished | postponed | suspended | cancelled",
     ),
+    page: Pagination = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
     _: ApiKey = Depends(require_api_key),
 ):
@@ -127,6 +140,19 @@ async def list_all_fixtures(
             ),
         )
 
+    conditions = []
+    if date_from and date_to:
+        conditions.append(
+            Fixture.kickoff_at >= datetime.combine(date_from, time.min, timezone.utc)
+        )
+        conditions.append(
+            Fixture.kickoff_at <= datetime.combine(date_to, time.max, timezone.utc)
+        )
+    if status is not None:
+        conditions.append(Fixture.status == status)
+
+    total = await _count_fixtures(session, *conditions)
+
     HomeTeam = aliased(Team, name="home_team")
     AwayTeam = aliased(Team, name="away_team")
 
@@ -134,22 +160,16 @@ async def list_all_fixtures(
         select(Fixture, HomeTeam, AwayTeam)
         .join(HomeTeam, HomeTeam.id == Fixture.home_team_id)
         .join(AwayTeam, AwayTeam.id == Fixture.away_team_id)
+        .where(*conditions)
         .order_by(Fixture.kickoff_at)
+        .offset(page.offset)
+        .limit(page.limit)
     )
-
-    if date_from and date_to:
-        query = query.where(
-            Fixture.kickoff_at >= datetime.combine(date_from, time.min, timezone.utc),
-            Fixture.kickoff_at <= datetime.combine(date_to, time.max, timezone.utc),
-        )
-    if status is not None:
-        query = query.where(Fixture.status == status)
-
     rows = (await session.exec(query)).all()
 
     items = [_to_fixture_out(fixture, home, away) for fixture, home, away in rows]
 
-    return FixtureListResponse(items=items, total=len(items))
+    return FixtureListResponse(items=items, total=total)
 
 
 @router.get("/fixtures/{fixture_id}", response_model=FixtureOut)
@@ -186,6 +206,7 @@ async def list_team_fixtures(
         None,
         description="scheduled | live | finished | postponed | suspended | cancelled",
     ),
+    page: Pagination = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
     _: ApiKey = Depends(require_api_key),
 ):
@@ -203,6 +224,15 @@ async def list_team_fixtures(
     if not season_year:
         return FixtureListResponse(items=[], total=0)
 
+    conditions = [
+        Fixture.season_year == season_year,
+        or_(Fixture.home_team_id == team_id, Fixture.away_team_id == team_id),
+    ]
+    if status is not None:
+        conditions.append(Fixture.status == status)
+
+    total = await _count_fixtures(session, *conditions)
+
     HomeTeam = aliased(Team, name="home_team")
     AwayTeam = aliased(Team, name="away_team")
 
@@ -210,18 +240,13 @@ async def list_team_fixtures(
         select(Fixture, HomeTeam, AwayTeam)
         .join(HomeTeam, HomeTeam.id == Fixture.home_team_id)
         .join(AwayTeam, AwayTeam.id == Fixture.away_team_id)
-        .where(
-            Fixture.season_year == season_year,
-            or_(Fixture.home_team_id == team_id, Fixture.away_team_id == team_id),
-        )
+        .where(*conditions)
         .order_by(Fixture.kickoff_at)
+        .offset(page.offset)
+        .limit(page.limit)
     )
-
-    if status is not None:
-        query = query.where(Fixture.status == status)
-
     rows = (await session.exec(query)).all()
 
     items = [_to_fixture_out(fixture, home, away) for fixture, home, away in rows]
 
-    return FixtureListResponse(items=items, total=len(items))
+    return FixtureListResponse(items=items, total=total)

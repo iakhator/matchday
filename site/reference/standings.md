@@ -15,6 +15,10 @@ The league table for a season.
 Defaults to the league's current season.
 </ParamCard>
 
+Also takes `limit`/`offset` - see [Pagination](/guide/pagination). Rarely
+needed here (a season table is one row per team), but present for
+consistency with the other list endpoints.
+
 ## Request
 
 ::: code-group

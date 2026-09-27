@@ -21,9 +21,7 @@ Defaults to the league's current season.
 Filter to one or more teams, e.g. for a head-to-head pick.
 </ParamCard>
 
-<ParamCard name="limit" type="integer" default="50">
-Maximum rows returned, up to 100.
-</ParamCard>
+Also takes `limit`/`offset` - see [Pagination](/guide/pagination).
 
 ## Request
 

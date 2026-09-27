@@ -116,6 +116,10 @@ export default defineConfig({
             link: "/guide/authentication",
           },
           {
+            text: withIcon("listOrdered", "Pagination"),
+            link: "/guide/pagination",
+          },
+          {
             text: withIcon("gitBranch", "API versioning & stability"),
             link: "/guide/versioning",
           },

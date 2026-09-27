@@ -16,6 +16,9 @@ rather than separate events to reconcile.
 
 ## Query parameters (list endpoints only)
 
+All three list endpoints also take `limit`/`offset` - see
+[Pagination](/guide/pagination).
+
 <ParamCard name="season" type="integer">
 Defaults to the league's current season on `/leagues/{id}/fixtures`, or the
 team's current league's current season on `/teams/{id}/fixtures`.

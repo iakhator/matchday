@@ -1,11 +1,13 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
+from app.core.pagination import Pagination, pagination_params
 from app.db.database import get_session
 from app.db.models import League, Standing, Team
 from app.schemas.standing import StandingListResponse, StandingOut
@@ -20,6 +22,7 @@ async def list_standings(
     season: Optional[int] = Query(
         None, description="Defaults to the league's current season"
     ),
+    page: Pagination = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
     _: ApiKey = Depends(require_api_key),
 ):
@@ -31,11 +34,21 @@ async def list_standings(
     if not season_year:
         return StandingListResponse(items=[], total=0)
 
+    conditions = (Standing.league_id == league.id, Standing.season_year == season_year)
+
+    total = (
+        await session.exec(
+            select(func.count()).select_from(Standing).where(*conditions)
+        )
+    ).one()
+
     query = (
         select(Standing, Team)
         .join(Team, Team.id == Standing.team_id)
-        .where(Standing.league_id == league.id, Standing.season_year == season_year)
+        .where(*conditions)
         .order_by(Standing.rank)
+        .offset(page.offset)
+        .limit(page.limit)
     )
     rows = (await session.exec(query)).all()
 
@@ -59,4 +72,4 @@ async def list_standings(
         for standing, team in rows
     ]
 
-    return StandingListResponse(items=items, total=len(items))
+    return StandingListResponse(items=items, total=total)

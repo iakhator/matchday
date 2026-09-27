@@ -1,11 +1,13 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.api_keys import ApiKey
 from app.core.auth import require_api_key
+from app.core.pagination import Pagination, pagination_params
 from app.db.database import get_session
 from app.db.models import League, PlayerStat, Team
 from app.schemas.player_stat import PlayerStatListResponse, PlayerStatOut
@@ -22,7 +24,7 @@ async def list_player_stats(
     team_id: Optional[List[int]] = Query(
         None, description="Filter to one or more team IDs, e.g. for a head-to-head pick"
     ),
-    limit: int = Query(50, le=100),
+    page: Pagination = Depends(pagination_params),
     session: AsyncSession = Depends(get_session),
     _: ApiKey = Depends(require_api_key),
 ):
@@ -43,16 +45,25 @@ async def list_player_stats(
     if not target_team_ids:
         return PlayerStatListResponse(items=[], total=0)
 
+    conditions = (
+        PlayerStat.team_id.in_(target_team_ids),
+        PlayerStat.season_year == season_year,
+    )
+
+    total = (
+        await session.exec(
+            select(func.count()).select_from(PlayerStat).where(*conditions)
+        )
+    ).one()
+
     query = (
         select(PlayerStat)
-        .where(
-            PlayerStat.team_id.in_(target_team_ids),
-            PlayerStat.season_year == season_year,
-        )
+        .where(*conditions)
         .order_by(PlayerStat.goals.desc(), PlayerStat.assists.desc())
-        .limit(limit)
+        .offset(page.offset)
+        .limit(page.limit)
     )
     rows = (await session.exec(query)).all()
 
     items = [PlayerStatOut.model_validate(row) for row in rows]
-    return PlayerStatListResponse(items=items, total=len(items))
+    return PlayerStatListResponse(items=items, total=total)

@@ -77,3 +77,19 @@ async def require_api_key(
         )
 
     return matched
+
+
+async def require_admin_key(api_key: ApiKey = Depends(require_api_key)) -> ApiKey:
+    """Same identity check as `require_api_key`, plus an admin check.
+
+    /admin/* triggers a sync, a backfill, or reactive enrichment on demand -
+    operator-only operations. Depending on `require_api_key` alone would let
+    any valid key reach them, including a self-serve key someone signed up
+    for through the public dashboard five minutes ago.
+    """
+    if not api_key.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="This key is not authorized for admin operations",
+        )
+    return api_key

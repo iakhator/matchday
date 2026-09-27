@@ -55,6 +55,11 @@ class ApiKey:
     # two different self-serve customers could otherwise both call a key
     # "predify" and end up sharing (and starving each other on) one bucket.
     rate_limit_key: str
+    # Env-configured keys are curated by hand by the operator, so they can
+    # reach /admin/*. Self-serve keys are minted by whoever signs up through
+    # the dashboard - never admin, regardless of plan. There is no path
+    # that sets this True for a DB-issued key.
+    is_admin: bool = False
 
     def __str__(self) -> str:
         """Safe for logs - deliberately never includes the secret."""
@@ -63,9 +68,14 @@ class ApiKey:
 
 # Identity used when auth is switched off for local development. Having a
 # real object here rather than None means callers never have to special
-# case it.
+# case it. Admin, so a self-hoster's local dev environment can still hit
+# /admin/* without configuring a key.
 ANONYMOUS = ApiKey(
-    name="anonymous", secret="", requests_per_minute=0, rate_limit_key="anonymous"
+    name="anonymous",
+    secret="",
+    requests_per_minute=0,
+    rate_limit_key="anonymous",
+    is_admin=True,
 )
 
 
@@ -100,7 +110,13 @@ def parse_api_keys(raw: str, default_rpm: int) -> List[ApiKey]:
         if not secret:
             continue
         keys.append(
-            ApiKey(name=name, secret=secret, requests_per_minute=rpm, rate_limit_key=name)
+            ApiKey(
+                name=name,
+                secret=secret,
+                requests_per_minute=rpm,
+                rate_limit_key=name,
+                is_admin=True,
+            )
         )
 
     return keys

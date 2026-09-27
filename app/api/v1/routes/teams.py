@@ -10,10 +10,10 @@ from app.db.database import get_session
 from app.db.models import League, Team
 from app.schemas.team import TeamOut
 
-router = APIRouter(prefix="/leagues/{league_id}/teams", tags=["teams"])
+router = APIRouter(tags=["teams"])
 
 
-@router.get("", response_model=List[TeamOut])
+@router.get("/leagues/{league_id}/teams", response_model=List[TeamOut])
 async def list_teams(
     league_id: int,
     session: AsyncSession = Depends(get_session),
@@ -33,10 +33,7 @@ async def list_teams(
     return teams
 
 
-team_detail_router = APIRouter(prefix="/teams", tags=["teams"])
-
-
-@team_detail_router.get("/{team_id}", response_model=TeamOut)
+@router.get("/teams/{team_id}", response_model=TeamOut)
 async def get_team(
     team_id: int,
     session: AsyncSession = Depends(get_session),

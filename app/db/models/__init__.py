@@ -1,4 +1,5 @@
 from app.db.models.api_key import ApiKeyRecord
+from app.db.models.api_key_usage import ApiKeyUsageDaily, ApiKeyUsageHourly
 from app.db.models.external_id import EntityType, ExternalId
 from app.db.models.fixture import Fixture
 from app.db.models.goal_event import GoalEvent
@@ -29,4 +30,6 @@ __all__ = [
     "SchedulerHeartbeat",
     "User",
     "ApiKeyRecord",
+    "ApiKeyUsageDaily",
+    "ApiKeyUsageHourly",
 ]

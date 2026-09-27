@@ -11,6 +11,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 # modules are only pulled in lazily elsewhere (e.g. connectors).
 from app.db.models import (  # noqa: F401
     ApiKeyRecord,
+    ApiKeyUsageDaily,
+    ApiKeyUsageHourly,
     ExternalId,
     Fixture,
     GoalEvent,

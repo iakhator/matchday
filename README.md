@@ -10,9 +10,13 @@
 
 Matchday continuously syncs leagues, teams, fixtures and scores from
 pluggable upstream connectors, normalizes them into a stable schema, and
-serves them through its own REST API - so the app that depends on it (like
-[Predify](../predify)) only ever talks to *your* API, not directly to a
-third-party vendor.
+serves them through its own public REST API - so any app that consumes it
+only ever talks to *this* API, not directly to a third-party vendor.
+Self-serve API keys, per-key rate limits and a signup dashboard (see
+[Authentication and rate limits](#authentication-and-rate-limits)) exist
+because this is built for multiple independent consumers, not one
+hardcoded backend. [Predify](../predify) is the first app built on it, not
+the only one it's for.
 
 ## Contents
 
@@ -472,11 +476,21 @@ duplicate rows.
 
 ## Consuming this from another app
 
-Both this repo and Predify join the same Docker network in dev
+The normal path is the public REST API over HTTPS, authenticated with an
+`X-Gateway-Key` header - see [Authentication and rate
+limits](#authentication-and-rate-limits). Keys come from the operator
+(`GATEWAY_API_KEYS`) or self-serve, via [the
+dashboard](site/account/dashboard.md); either way, a consumer needs only a
+key and a base URL, not a shared network or special access.
+
+Docker network co-location is a shortcut for a consumer that happens to be
+deployed alongside this gateway, not a requirement. In dev, this repo and
+[Predify](../predify) join the same Docker network
 (`predify_predify-network`), so from inside Predify's API container this
-gateway is reachable at `http://matchday_gateway_api_dev:8010`. Set
-`GATEWAY_API_KEYS` here and pass the matching key as `X-Gateway-Key` from
-the consuming app once you're ready to lock it down.
+gateway is reachable at `http://matchday_gateway_api_dev:8010` without
+going over the public internet. Any other consumer - self-hosted, on a
+different host, run by someone else entirely - reaches the same API over
+HTTPS with a key, the same way Predify does in production.
 
 ## Status
 

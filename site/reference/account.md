@@ -4,6 +4,7 @@
 <MethodBadge method="GET" path="/api/v1/account/keys" />
 <MethodBadge method="DELETE" path="/api/v1/account/keys/{id}" />
 <MethodBadge method="POST" path="/api/v1/account/keys/{id}/rotate" />
+<MethodBadge method="GET" path="/api/v1/account/usage" />
 
 <EndpointMeta :stats="[
   { label: 'Auth', value: 'Bearer (Firebase)' },
@@ -136,3 +137,37 @@ live keys you're holding.
 <ErrorCode code="404" title="Key not found">
 Same rule as revoke: doesn't exist, or isn't yours.
 </ErrorCode>
+
+## Check your usage
+
+`GET /account/usage` - today's and this month's request count for every
+key you own, plus an hourly series for the last 24 hours. The
+[dashboard](/account/dashboard) charts this directly; call it yourself if
+you're building your own monitoring around it.
+
+```json
+{
+  "items": [
+    {
+      "key_id": "01991e3f-...",
+      "name": "my-app",
+      "requests_today": 123,
+      "requests_this_month": 4021,
+      "hourly": [
+        { "hour": "2026-09-26T15:00:00Z", "count": 2 },
+        { "hour": "2026-09-26T16:00:00Z", "count": 0 },
+        { "hour": "2026-09-27T14:00:00Z", "count": 45 }
+      ]
+    }
+  ]
+}
+```
+
+`hourly` is always 24 entries, oldest first, zero-filled for hours with no
+traffic - a continuous series rather than gaps wherever nothing happened.
+Counted from the same per-key identity the rate limiter itself buckets
+by, so this can't disagree with what actually tripped a `429`.
+
+Aggregated daily rather than logged per request - there's no raw
+request-by-request detail here (no per-endpoint or per-status breakdown),
+only how many requests a key made per hour and per day.

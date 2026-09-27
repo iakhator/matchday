@@ -7,13 +7,17 @@ import {
   createKey,
   revokeKey,
   rotateKey,
+  getUsage,
   type ApiKeySummary,
+  type KeyUsage,
 } from "../gatewayApi";
+import UsageChart from "./UsageChart.vue";
 
 const { user, authReady, configError, idToken } = useAuth();
 const router = useRouter();
 
 const keys = ref<ApiKeySummary[]>([]);
+const usageByKey = ref<Record<string, KeyUsage>>({});
 const loading = ref(true);
 const error = ref<string | null>(null);
 const newKeyName = ref("");
@@ -55,6 +59,16 @@ async function refresh() {
     error.value = (err as Error).message;
   } finally {
     loading.value = false;
+  }
+
+  // Usage failing is not fatal to the dashboard - a key list a customer
+  // can still act on beats no dashboard at all because a chart's request
+  // failed.
+  try {
+    const usage = await getUsage(token);
+    usageByKey.value = Object.fromEntries(usage.map((u) => [u.key_id, u]));
+  } catch {
+    usageByKey.value = {};
   }
 }
 
@@ -194,6 +208,25 @@ function fmt(d: string | null) {
         </div>
       </div>
     </div>
+
+    <div class="usage-section" v-if="keys.length && Object.keys(usageByKey).length">
+      <h3 class="usage-section-title">Usage</h3>
+      <p class="usage-section-desc">
+        How much of your rate limit you're actually using, by key - the
+        numbers behind a 429 or a bill, not just the limit itself.
+      </p>
+
+      <div class="usage-key-block" v-for="k in keys" :key="`usage-${k.id}`">
+        <div class="usage-key-header" v-if="usageByKey[k.id]">
+          <span class="usage-key-name">{{ k.name }}</span>
+          <span class="usage-key-totals">
+            {{ usageByKey[k.id].requests_today }} today
+            · {{ usageByKey[k.id].requests_this_month }} this month
+          </span>
+        </div>
+        <UsageChart v-if="usageByKey[k.id]" :hourly="usageByKey[k.id].hourly" />
+      </div>
+    </div>
   </div>
   <div class="dashboard" v-else>
     <p class="loading">Loading...</p>
@@ -205,6 +238,54 @@ function fmt(d: string | null) {
   max-width: 640px;
   margin: 0 auto;
   padding: 24px 0;
+}
+
+/* The usage section reads better wider than the key-management column
+   above it - a 24-bar chart cramped into 640px is unreadable. */
+.usage-section {
+  max-width: 880px;
+  margin: 28px auto 0;
+  width: 100%;
+}
+
+.usage-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.usage-section-desc {
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+  margin: 0 0 16px;
+}
+
+.usage-key-block {
+  border-radius: 12px;
+  border: 1px solid var(--matchday-c-card-border);
+  background: var(--matchday-c-card-bg);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+}
+
+.usage-key-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.usage-key-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.usage-key-totals {
+  font-size: 12px;
+  color: var(--vp-c-text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .new-key-card {

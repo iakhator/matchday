@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
@@ -9,6 +10,7 @@ from app.core.config import settings
 from app.core.user_auth import require_firebase_user
 from app.db.database import get_session
 from app.db.models.api_key import ApiKeyRecord
+from app.db.models.api_key_usage import ApiKeyUsageDaily, ApiKeyUsageHourly
 from app.db.models.user import User
 from app.schemas.api_key import (
     ApiKeyCreatedOut,
@@ -16,6 +18,10 @@ from app.schemas.api_key import (
     ApiKeyListResponse,
     ApiKeyOut,
 )
+from app.schemas.usage import HourlyUsageOut, KeyUsageOut, UsageResponse
+from app.utils.datetime_utils import ensure_utc, utcnow
+
+HOURLY_WINDOW_HOURS = 24
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -90,6 +96,73 @@ async def list_keys(
     ).all()
     items = [ApiKeyOut.model_validate(row) for row in rows]
     return ApiKeyListResponse(items=items, total=len(items))
+
+
+@router.get("/usage", response_model=UsageResponse)
+async def get_usage(
+    user: User = Depends(require_firebase_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Today's and this month's request count for every key this account
+    owns, plus an hourly series for the last 24 hours - people will not
+    trust a limit or a bill they cannot check against their own numbers,
+    and a rollup alone can't explain a burst that tripped a 429."""
+    keys = await _owned_live_keys(session, user)
+    now = utcnow()
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    window_start = current_hour - timedelta(hours=HOURLY_WINDOW_HOURS - 1)
+    today = now.date()
+    month_start = today.replace(day=1)
+
+    items = []
+    for key in keys:
+        rate_limit_key = str(key.id)
+
+        daily_rows = (
+            await session.exec(
+                select(ApiKeyUsageDaily).where(
+                    ApiKeyUsageDaily.rate_limit_key == rate_limit_key,
+                    ApiKeyUsageDaily.date >= month_start,
+                )
+            )
+        ).all()
+
+        hourly_rows = (
+            await session.exec(
+                select(ApiKeyUsageHourly).where(
+                    ApiKeyUsageHourly.rate_limit_key == rate_limit_key,
+                    ApiKeyUsageHourly.hour >= window_start,
+                )
+            )
+        ).all()
+        # Normalized to UTC before keying the dict - SQLite (tests) doesn't
+        # round-trip a timezone-aware datetime the same way Postgres does.
+        counts_by_hour = {
+            ensure_utc(row.hour): row.request_count for row in hourly_rows
+        }
+        # Zero-filled so the chart gets a continuous 24-point series rather
+        # than gaps wherever an hour had no traffic.
+        hourly = [
+            HourlyUsageOut(
+                hour=window_start + timedelta(hours=i),
+                count=counts_by_hour.get(window_start + timedelta(hours=i), 0),
+            )
+            for i in range(HOURLY_WINDOW_HOURS)
+        ]
+
+        items.append(
+            KeyUsageOut(
+                key_id=key.id,
+                name=key.name,
+                requests_today=sum(
+                    r.request_count for r in daily_rows if r.date == today
+                ),
+                requests_this_month=sum(r.request_count for r in daily_rows),
+                hourly=hourly,
+            )
+        )
+
+    return UsageResponse(items=items)
 
 
 @router.delete("/keys/{key_id}", response_model=ApiKeyOut)

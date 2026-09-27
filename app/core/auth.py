@@ -12,6 +12,7 @@ from app.core.api_keys import (
 )
 from app.core.config import settings
 from app.core.rate_limit import limiter
+from app.core.usage import record_usage
 from app.db.database import get_session
 
 api_key_header = APIKeyHeader(name="X-Gateway-Key", auto_error=False)
@@ -75,5 +76,9 @@ async def require_api_key(
             ),
             headers={"Retry-After": str(retry_after)},
         )
+
+    # ANONYMOUS never reaches here - it returns above, before a key is
+    # matched - so every call past this point is a real, metered key.
+    await record_usage(session, matched.rate_limit_key)
 
     return matched

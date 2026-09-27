@@ -237,6 +237,89 @@ class TestRotateKey:
         assert r.status_code == 404
 
 
+class TestUsage:
+    """GET /account/usage - see app.core.usage for how these rows get
+    written; this covers reading them back in the shape a dashboard
+    chart needs."""
+
+    async def test_reports_daily_monthly_and_hourly_for_each_owned_key(
+        self, client, test_session, owner
+    ):
+        from app.db.models.api_key_usage import ApiKeyUsageDaily, ApiKeyUsageHourly
+        from app.utils.datetime_utils import utcnow
+
+        created = await client.post("/api/v1/account/keys", json={"name": "my-app"})
+        key_id = created.json()["id"]
+
+        now = utcnow()
+        this_hour = now.replace(minute=0, second=0, microsecond=0)
+        test_session.add(
+            ApiKeyUsageDaily(
+                rate_limit_key=key_id, date=now.date(), request_count=7
+            )
+        )
+        test_session.add(
+            ApiKeyUsageHourly(
+                rate_limit_key=key_id, hour=this_hour, request_count=3
+            )
+        )
+        await test_session.commit()
+
+        body = (await client.get("/api/v1/account/usage")).json()
+        assert len(body["items"]) == 1
+        item = body["items"][0]
+        assert item["name"] == "my-app"
+        assert item["requests_today"] == 7
+        assert item["requests_this_month"] == 7
+
+        assert len(item["hourly"]) == 24
+        assert item["hourly"][-1]["count"] == 3
+        # Every other hour in the window had no traffic - zero-filled, not
+        # missing, so the chart gets a continuous series.
+        assert sum(h["count"] for h in item["hourly"][:-1]) == 0
+
+    async def test_a_key_with_no_usage_yet_gets_an_all_zero_series(
+        self, client
+    ):
+        await client.post("/api/v1/account/keys", json={"name": "fresh-key"})
+
+        body = (await client.get("/api/v1/account/usage")).json()
+        item = body["items"][0]
+        assert item["requests_today"] == 0
+        assert item["requests_this_month"] == 0
+        assert len(item["hourly"]) == 24
+        assert all(h["count"] == 0 for h in item["hourly"])
+
+    async def test_no_keys_returns_an_empty_list(self, client):
+        body = (await client.get("/api/v1/account/usage")).json()
+        assert body == {"items": []}
+
+    async def test_only_reports_the_callers_own_keys(
+        self, test_session, owner
+    ):
+        from fastapi import FastAPI
+
+        other_user = await _make_user(test_session, email="other@example.com")
+
+        app = FastAPI()
+        app.include_router(api_router)
+        app.dependency_overrides[get_session] = lambda: test_session
+
+        app.dependency_overrides[require_firebase_user] = lambda: other_user
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as other_client:
+            await other_client.post("/api/v1/account/keys", json={"name": "theirs"})
+
+        app.dependency_overrides[require_firebase_user] = lambda: owner
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as owner_client:
+            body = (await owner_client.get("/api/v1/account/usage")).json()
+
+        assert body == {"items": []}
+
+
 class TestRequireFirebaseUser:
     """The token-verification chain itself, not bypassed by the `client`
     fixture above - this is what actually protects the endpoints."""

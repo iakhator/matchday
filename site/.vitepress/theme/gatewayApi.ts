@@ -17,6 +17,20 @@ export interface ApiKeyCreated extends ApiKeySummary {
   secret: string;
 }
 
+export interface HourlyUsage {
+  hour: string;
+  count: number;
+}
+
+export interface KeyUsage {
+  key_id: string;
+  name: string;
+  requests_today: number;
+  requests_this_month: number;
+  // Last 24 hours, oldest first, zero-filled - see app/schemas/usage.py.
+  hourly: HourlyUsage[];
+}
+
 class GatewayApiError extends Error {
   constructor(
     message: string,
@@ -71,4 +85,9 @@ export async function rotateKey(token: string, id: string): Promise<ApiKeyCreate
   return request<ApiKeyCreated>(`/account/keys/${id}/rotate`, token, {
     method: "POST",
   });
+}
+
+export async function getUsage(token: string): Promise<KeyUsage[]> {
+  const data = await request<{ items: KeyUsage[] }>("/account/usage", token);
+  return data.items;
 }

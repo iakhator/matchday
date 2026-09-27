@@ -3,6 +3,7 @@
 <MethodBadge method="GET" path="/api/v1/leagues/{id}/fixtures" />
 <MethodBadge method="GET" path="/api/v1/fixtures/{id}" />
 <MethodBadge method="GET" path="/api/v1/teams/{id}/fixtures" />
+<MethodBadge method="GET" path="/api/v1/fixtures" />
 
 <EndpointMeta :stats="[
   { label: 'Auth', value: 'X-Gateway-Key' },
@@ -30,8 +31,40 @@ team's fixtures aren't scoped to one competition's matchday numbering.
   type="string (enum)"
   :enum-values="['scheduled', 'live', 'finished', 'postponed', 'suspended', 'cancelled']"
 >
-Filter fixtures by their current status. Supported on both list endpoints.
+Filter fixtures by their current status. Supported on every list endpoint.
 </ParamCard>
+
+<ParamCard name="date_from" type="date (YYYY-MM-DD)">
+`/fixtures` only. Inclusive, UTC. Must be given together with `date_to` -
+see below.
+</ParamCard>
+
+<ParamCard name="date_to" type="date (YYYY-MM-DD)">
+`/fixtures` only. Inclusive, UTC, at most 31 days after `date_from`.
+</ParamCard>
+
+## Cross-league discovery: `GET /fixtures`
+
+The other list endpoints are scoped to one league or team, which bounds
+the result on its own. `/fixtures` has no such boundary, so it requires
+either a date range (`date_from` + `date_to`, capped at 31 days) or
+`status=live` - live fixtures are inherently a small set, so that one is
+allowed with no date range at all. Requesting neither, or only one half of
+a date range, is a `400`.
+
+::: code-group
+
+```bash [curl - what's on this week]
+curl "https://api.matchday.example/api/v1/fixtures?date_from=2026-09-22&date_to=2026-09-28" \
+  -H "X-Gateway-Key: $MATCHDAY_KEY"
+```
+
+```bash [curl - what's live right now]
+curl "https://api.matchday.example/api/v1/fixtures?status=live" \
+  -H "X-Gateway-Key: $MATCHDAY_KEY"
+```
+
+:::
 
 ## Request
 

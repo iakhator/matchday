@@ -1,3 +1,4 @@
+from datetime import date, datetime, time, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +15,11 @@ from app.schemas.fixture import FixtureListResponse, FixtureOut
 from app.schemas.team import TeamOut
 
 router = APIRouter(tags=["fixtures"])
+
+# Cross-league discovery has no league/season boundary to implicitly limit
+# the result set the way the per-league endpoint does, so a date range is
+# required (see list_all_fixtures) and capped here.
+MAX_DATE_RANGE_DAYS = 31
 
 
 def _to_fixture_out(fixture: Fixture, home_team: Team, away_team: Team) -> FixtureOut:
@@ -70,6 +76,72 @@ async def list_fixtures(
 
     if matchday is not None:
         query = query.where(Fixture.matchday == matchday)
+    if status is not None:
+        query = query.where(Fixture.status == status)
+
+    rows = (await session.exec(query)).all()
+
+    items = [_to_fixture_out(fixture, home, away) for fixture, home, away in rows]
+
+    return FixtureListResponse(items=items, total=len(items))
+
+
+@router.get("/fixtures", response_model=FixtureListResponse)
+async def list_all_fixtures(
+    date_from: Optional[date] = Query(None, description="Inclusive, UTC"),
+    date_to: Optional[date] = Query(None, description="Inclusive, UTC"),
+    status: Optional[str] = Query(
+        None,
+        description="scheduled | live | finished | postponed | suspended | cancelled",
+    ),
+    session: AsyncSession = Depends(get_session),
+    _: ApiKey = Depends(require_api_key),
+):
+    """Cross-league fixture discovery - "what's on today" or "what's live
+    right now" without already knowing which league(s) to ask. Unlike the
+    per-league endpoint, there's no league/season boundary implicitly
+    bounding the result, so a date range is required unless the query is
+    scoped to status=live, which is inherently small."""
+    if bool(date_from) != bool(date_to):
+        raise HTTPException(
+            status_code=400,
+            detail="date_from and date_to must be provided together",
+        )
+
+    if date_from and date_to:
+        if date_to < date_from:
+            raise HTTPException(
+                status_code=400, detail="date_to must not be before date_from"
+            )
+        if (date_to - date_from).days > MAX_DATE_RANGE_DAYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"date range must not exceed {MAX_DATE_RANGE_DAYS} days",
+            )
+    elif status != "live":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "date_from and date_to are required unless status=live - "
+                "an unscoped query across every league is not supported"
+            ),
+        )
+
+    HomeTeam = aliased(Team, name="home_team")
+    AwayTeam = aliased(Team, name="away_team")
+
+    query = (
+        select(Fixture, HomeTeam, AwayTeam)
+        .join(HomeTeam, HomeTeam.id == Fixture.home_team_id)
+        .join(AwayTeam, AwayTeam.id == Fixture.away_team_id)
+        .order_by(Fixture.kickoff_at)
+    )
+
+    if date_from and date_to:
+        query = query.where(
+            Fixture.kickoff_at >= datetime.combine(date_from, time.min, timezone.utc),
+            Fixture.kickoff_at <= datetime.combine(date_to, time.max, timezone.utc),
+        )
     if status is not None:
         query = query.where(Fixture.status == status)
 

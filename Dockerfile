@@ -48,17 +48,23 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 USER gateway
 
-EXPOSE 8010
+EXPOSE 8010 8020
 
 # Liveness only - deliberately not /health/scheduler. A stale sync job
 # means the data is going stale, not that this container is broken, and
 # restarting it would neither fix the sync nor stop the restart loop.
 # Point an uptime monitor at /health/scheduler instead; see the README.
+#
+# This checks the `serve` port (8010) because that is the default CMD. A
+# container run as `scheduler` listens on 8020 instead - override
+# HEALTHCHECK for that service in docker-compose/your orchestrator rather
+# than here, since one static instruction cannot cover both ports.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8010/health || exit 1
 
 # `serve` starts the API; `migrate` applies migrations and exits, for a
-# release phase to call. See docker-entrypoint.sh for why migrations are
-# not run automatically on start.
+# release phase to call; `scheduler` runs the sync jobs standalone. See
+# docker-entrypoint.sh for why migrations are not run automatically on
+# start, and for what `scheduler` is for.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["serve"]

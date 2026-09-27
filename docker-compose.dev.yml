@@ -50,6 +50,29 @@ services:
       # going through localhost/host networking.
       - predify-network
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: matchday_gateway_scheduler_dev
+    restart: unless-stopped
+    command:
+      [
+        "uv", "run", "uvicorn", "app.scheduler.main:app",
+        "--host", "0.0.0.0", "--port", "8020", "--reload",
+      ]
+    ports:
+      - "8020:8020"
+    env_file:
+      - .env.local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - gateway-network
+
 networks:
   gateway-network:
     driver: bridge

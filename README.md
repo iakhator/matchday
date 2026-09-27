@@ -101,7 +101,9 @@ attribution](site/guide/licensing.md).
   window (cheap DB check first) - all configurable via `SchedulerConfig`.
   Each job stamps a heartbeat on success; `GET /health/scheduler` reports
   unhealthy the moment any job's heartbeat goes stale (see
-  `app/core/heartbeat.py`) - point an uptime monitor at it.
+  `app/core/heartbeat.py`) - point an uptime monitor at it. Runs as its
+  own process (`app/scheduler/main.py`, the `scheduler` command), never
+  inside the API - see "The scheduler is a separate process" below.
 - `app/services/id_mapper.py` - translates an upstream provider's ids into
   this gateway's. Consumers build against ids this gateway owns, so an
   upstream can be swapped without their data changing underneath them; the
@@ -326,6 +328,36 @@ that is deployed will fail the next release phase on a revision it cannot
 find, and you get to work that out while a deploy is half-done. Let the
 pipeline own it.
 
+### The scheduler is a separate process
+
+A third command, for the same reason `migrate` is its own command and not
+part of `serve`:
+
+```bash
+docker run ... matchday-gateway:latest scheduler  # run the sync jobs, no API
+```
+
+`serve` never runs the sync jobs itself - only `scheduler` does. Run
+exactly one `scheduler` container per deployment alongside however many
+`serve` containers you need. This is not optional the way `migrate` vs.
+`serve` might look at a glance: if `serve` also ran the scheduler,
+horizontally scaling it would mean two replicas both firing every job
+against the same thin upstream quota (football-data.org's free tier: 10
+requests/minute) - even a brief two-replica window during a zero-downtime
+deploy would cause this. So there is no flag to fold the scheduler back
+into `serve`; a deployment that forgets to run `scheduler` gets a live API
+with data that quietly never updates, rather than two racing schedulers.
+`docker-compose.dev.yml` runs both as separate services already, as a
+worked example.
+
+`GET /health/scheduler` stays on the API process, unchanged for existing
+consumers, even though `serve` doesn't run the jobs it reports on. It
+reads the `SchedulerHeartbeat` table, not in-process scheduler state (see
+`app/core/heartbeat.py`), so it works as a read-only view onto whatever
+the `scheduler` process is doing. The `scheduler` process has its own bare
+`GET /health` for its own container's liveness check - not the same
+endpoint, since job health and process liveness are different questions.
+
 ### What must be set
 
 | | |
@@ -340,7 +372,8 @@ image by `.dockerignore`, so a stray local config cannot be baked in.
 
 Optional: `PORT` (default 8010) and `WEB_CONCURRENCY` (default 1). Raise
 workers only having read the rate-limit note above - limits are counted
-per process, so N workers allow N times the configured rate.
+per process, so N workers allow N times the configured rate. For the
+`scheduler` container: `SCHEDULER_PORT` (default 8020).
 
 ### Health and monitoring
 

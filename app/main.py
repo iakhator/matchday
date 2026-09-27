@@ -11,7 +11,6 @@ from app.core.heartbeat import get_job_health, seed_heartbeats_on_startup
 from app.core.logger import logger
 from app.core.versioning import API_VERSION
 from app.db.database import async_session, get_session
-from app.scheduler.start_scheduler import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
@@ -31,11 +30,14 @@ async def lifespan(app: FastAPI):
             "section 'Optional connectors, and the tradeoff they carry'."
         )
 
+    # This process never runs the scheduler - see app/scheduler/main.py,
+    # started via the `scheduler` command (docker-entrypoint.sh). Seeding
+    # still happens here: /health/scheduler reads the heartbeat table, not
+    # in-process scheduler state, so it stays accurate on this process
+    # regardless of whether the scheduler process has started yet.
     async with async_session() as session:
         await seed_heartbeats_on_startup(session)
-    start_scheduler()
     yield
-    stop_scheduler()
     logger.info("Shut down cleanly")
 
 

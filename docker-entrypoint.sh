@@ -3,7 +3,11 @@
 # Entrypoint for the production image.
 #
 #   migrate   apply database migrations, then exit
-#   serve     run the API (the default)
+#   serve     run the API (the default) - never runs the sync jobs itself
+#   scheduler run the sync jobs, no API routes - exactly one of these per
+#             deployment; `serve` does not fall back to running them, so
+#             a deployment that never runs `scheduler` gets a live API
+#             with data that never updates
 #   <other>   executed as-is, so `docker run ... sh` still works
 #
 # Migrations are deliberately NOT run on `serve`. Two reasons:
@@ -38,6 +42,16 @@ case "${1:-serve}" in
             --host 0.0.0.0 \
             --port "${PORT:-8010}" \
             --workers "${WEB_CONCURRENCY:-1}"
+        ;;
+    scheduler)
+        # Always exactly one worker. Two would mean two schedulers firing
+        # every job twice - the same problem this command exists to avoid,
+        # just moved one layer down - so this is not configurable via
+        # WEB_CONCURRENCY like `serve` is.
+        exec uvicorn app.scheduler.main:app \
+            --host 0.0.0.0 \
+            --port "${SCHEDULER_PORT:-8020}" \
+            --workers 1
         ;;
     *)
         exec "$@"

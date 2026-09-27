@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.api_keys import generate_secret, parse_api_keys
-from app.core.auth import require_api_key
+from app.core.auth import require_admin_key, require_api_key
 from app.core.config import settings
 from app.core.rate_limit import RateLimiter, limiter
 from app.db.models.api_key import ApiKeyRecord
@@ -278,6 +278,37 @@ class TestParsing:
     def test_rate_limit_key_defaults_to_name(self):
         [key] = parse_api_keys("predify:s3cret", default_rpm=60)
         assert key.rate_limit_key == "predify"
+
+
+class TestAdminScope:
+    """/admin/* must stay operator-only even once self-serve signup is the
+    front door - see require_admin_key in app/core/auth.py."""
+
+    async def test_env_key_is_admin(self, monkeypatch, test_session):
+        monkeypatch.setattr(settings, "GATEWAY_API_KEYS", "ops:secret")
+        api_key = await require_api_key(api_key="secret", session=test_session)
+
+        result = await require_admin_key(api_key=api_key)
+        assert result.name == "ops"
+
+    async def test_self_serve_key_is_rejected(self, monkeypatch, test_session):
+        monkeypatch.setattr(settings, "GATEWAY_API_KEYS", "ops:secret")
+        plaintext = await _create_user_and_key(test_session, name="predify")
+        api_key = await require_api_key(api_key=plaintext, session=test_session)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_admin_key(api_key=api_key)
+        assert exc_info.value.status_code == 403
+
+    async def test_anonymous_dev_key_is_admin(self, monkeypatch, test_session):
+        """A self-hoster's local dev environment must still reach /admin/*
+        without configuring a key."""
+        monkeypatch.setattr(settings, "GATEWAY_API_KEYS", "")
+        monkeypatch.setattr(settings, "GATEWAY_ALLOW_ANONYMOUS", True)
+        api_key = await require_api_key(api_key=None, session=test_session)
+
+        result = await require_admin_key(api_key=api_key)
+        assert result.name == "anonymous"
 
 
 class TestSlidingWindow:

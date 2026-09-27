@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.api_keys import ApiKey
-from app.core.auth import require_api_key
+from app.core.auth import require_admin_key
 from app.core.logger import logger
 from app.core.scheduler_config import SchedulerConfig
 from app.db.database import get_session
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 @router.post("/sync")
 async def trigger_sync(
     session: AsyncSession = Depends(get_session),
-    _: ApiKey = Depends(require_api_key),
+    _: ApiKey = Depends(require_admin_key),
 ):
     """Manually trigger a full sync of every tracked competition. Useful for
     self-hosters getting a fresh gateway populated without waiting for the
@@ -70,7 +70,7 @@ async def trigger_sync(
 async def trigger_backfill(
     competition_code: str,
     session: AsyncSession = Depends(get_session),
-    _: ApiKey = Depends(require_api_key),
+    _: ApiKey = Depends(require_admin_key),
 ):
     """Manually-triggered emergency path - never run automatically. Use
     this after football-data.org has been down, to fill in final scores
@@ -96,7 +96,7 @@ async def trigger_backfill(
 async def trigger_fixture_enrichment(
     fixture_id: int,
     session: AsyncSession = Depends(get_session),
-    _: ApiKey = Depends(require_api_key),
+    _: ApiKey = Depends(require_admin_key),
 ):
     """Manually (re-)run Understat post-match enrichment for one already-
     finished fixture - the automatic path only fires reactively when a
